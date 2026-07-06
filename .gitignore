@@ -1,0 +1,27 @@
+# STM32CubeIDE Build outputs
+Debug/
+Release/
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+*.d
+*.su
+.settings/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+.env
+
+# Large datasets & binaries
+*.csv
+*.zip
+*.png
+
+# Custom configurations
+materiais_customizados.txt
