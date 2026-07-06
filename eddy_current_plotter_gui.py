@@ -2549,3 +2549,297 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if self.tooltip_estatistico.isVisible():
                 self.tooltip_estatistico.hide()
 
+    def ao_toggle_ar_livre_val_material(self, checked):
+        if checked:
+            self.rad_val_cls_ar.blockSignals(True)
+            self.rad_val_cls_ar.setChecked(True)
+            self.rad_val_cls_ar.blockSignals(False)
+
+    def ao_toggle_ar_livre_val_classe(self, checked):
+        if checked:
+            self.rad_val_mat_ar.blockSignals(True)
+            self.rad_val_mat_ar.setChecked(True)
+            self.rad_val_mat_ar.blockSignals(False)
+
+    def obter_material_e_classe_validacao(self):
+        if self.rad_val_mat_comum.isChecked():
+            material = "A36 Comum"
+        elif self.rad_val_mat_ge.isChecked():
+            material = "A36 GE"
+        elif self.rad_val_mat_gf.isChecked():
+            material = "A36 GF"
+        else:
+            material = "Ar Livre"
+            
+        if self.rad_val_cls_saudavel.isChecked():
+            classe = "Saudável"
+        elif self.rad_val_cls_leve.isChecked():
+            classe = "Leve"
+        elif self.rad_val_cls_moderada.isChecked():
+            classe = "Moderada"
+        elif self.rad_val_cls_avancada.isChecked():
+            classe = "Avançada"
+        elif self.rad_val_cls_corroido.isChecked():
+            classe = "Corroído"
+        else:
+            classe = "Ar Livre"
+        return material, classe
+
+    def iniciar_ensaio_validacao(self):
+        if not self.serial_thread.running:
+            QtWidgets.QMessageBox.warning(self, "Sem conexão", "Conecte na porta serial antes de iniciar o teste de validação!")
+            return
+            
+        id_amostra = self.edit_val_id.text().strip()
+        if not id_amostra:
+            QtWidgets.QMessageBox.warning(self, "ID Vazio", "Por favor, insira o ID do cupom para validação!")
+            return
+            
+        opcao_tempo = self.combo_val_duracao.currentText()
+        if opcao_tempo == "Contínuo (Manual)":
+            self.val_test_duration = -1
+        elif opcao_tempo == "1 segundo":
+            self.val_test_duration = 1000
+        elif opcao_tempo == "10 segundos":
+            self.val_test_duration = 10000
+        elif opcao_tempo == "30 segundos":
+            self.val_test_duration = 30000
+        elif opcao_tempo == "60 segundos":
+            self.val_test_duration = 60000
+            
+        self.val_samples_captured = 0
+        self.val_mat_matches = 0
+        self.val_cls_matches = 0
+        self.val_test_elapsed = 0
+        self.val_test_data = []
+        
+        self.lbl_c1_val.setText("0")
+        self.lbl_c2_val.setText("0.0%")
+        self.lbl_c3_val.setText("0.0%")
+        self.tbl_val_resultados.setRowCount(0)
+        self.console_val_relatorio.clear()
+        self.console_val_relatorio.append(">>> TESTE DE VALIDAÇÃO INICIADO <<<")
+        
+        self.btn_val_iniciar.setEnabled(False)
+        self.btn_val_iniciar.setStyleSheet("background-color: #7f8c8d; color: white; font-weight: bold; font-size: 11pt;")
+        self.btn_val_finalizar.setEnabled(True)
+        self.btn_val_finalizar.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; font-size: 11pt;")
+        
+        self.edit_val_id.setEnabled(False)
+        self.combo_val_duracao.setEnabled(False)
+        self.rad_val_mat_comum.setEnabled(False)
+        self.rad_val_mat_ge.setEnabled(False)
+        self.rad_val_mat_gf.setEnabled(False)
+        self.rad_val_mat_ar.setEnabled(False)
+        self.rad_val_cls_saudavel.setEnabled(False)
+        self.rad_val_cls_leve.setEnabled(False)
+        self.rad_val_cls_moderada.setEnabled(False)
+        self.rad_val_cls_avancada.setEnabled(False)
+        self.rad_val_cls_corroido.setEnabled(False)
+        self.rad_val_cls_ar.setEnabled(False)
+        
+        self.is_running_validation_test = True
+        self.lbl_val_status.setText("Status: Executando...")
+        self.lbl_val_status.setStyleSheet("color: #2ecc71; font-weight: bold;")
+        
+        if self.val_test_duration > 0:
+            self.progress_val.setValue(0)
+            self.lbl_val_timer.setText(f"Tempo Restante: {self.val_test_duration/1000:.1f} s")
+            self.val_test_timer.start(100)
+        else:
+            self.progress_val.setValue(100)
+            self.lbl_val_timer.setText("Duração: Manual (Contínuo)")
+            
+        if not self.chk_auto_trigger.isChecked():
+            self.chk_auto_trigger.setChecked(True)
+
+    def ao_tick_ensaio_validacao(self):
+        if not self.is_running_validation_test:
+            return
+            
+        self.val_test_elapsed += 100
+        tempo_restante = max(0, self.val_test_duration - self.val_test_elapsed)
+        self.lbl_val_timer.setText(f"Tempo Restante: {tempo_restante/1000:.1f} s")
+        
+        porcentagem = int((self.val_test_elapsed / self.val_test_duration) * 100)
+        self.progress_val.setValue(porcentagem)
+        
+        if self.val_test_elapsed >= self.val_test_duration:
+            self.val_test_timer.stop()
+            self.finalizar_ensaio_validacao()
+
+    def finalizar_ensaio_validacao(self):
+        if not self.is_running_validation_test:
+            return
+            
+        self.is_running_validation_test = False
+        self.val_test_timer.stop()
+        
+        self.btn_val_iniciar.setEnabled(True)
+        self.btn_val_iniciar.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt;")
+        self.btn_val_finalizar.setEnabled(False)
+        self.btn_val_finalizar.setStyleSheet("background-color: #7f8c8d; color: white; font-weight: bold; font-size: 11pt;")
+        
+        self.edit_val_id.setEnabled(True)
+        self.combo_val_duracao.setEnabled(True)
+        self.rad_val_mat_comum.setEnabled(True)
+        self.rad_val_mat_ge.setEnabled(True)
+        self.rad_val_mat_gf.setEnabled(True)
+        self.rad_val_mat_ar.setEnabled(True)
+        self.rad_val_cls_saudavel.setEnabled(True)
+        self.rad_val_cls_leve.setEnabled(True)
+        self.rad_val_cls_moderada.setEnabled(True)
+        self.rad_val_cls_avancada.setEnabled(True)
+        self.rad_val_cls_corroido.setEnabled(True)
+        self.rad_val_cls_ar.setEnabled(True)
+        
+        self.lbl_val_status.setText("Status: Finalizado")
+        self.lbl_val_status.setStyleSheet("color: #f1c40f; font-weight: bold;")
+        
+        self.chk_auto_trigger.setChecked(False)
+        self.gerar_relatorio_ensaio_validacao()
+
+    def gerar_relatorio_ensaio_validacao(self):
+        self.console_val_relatorio.append("\n==========================================")
+        self.console_val_relatorio.append("   RELATÓRIO FINAL DE VALIDAÇÃO DA IA")
+        self.console_val_relatorio.append("==========================================")
+        
+        id_amostra = self.edit_val_id.text().strip()
+        mat_real, cls_real = self.obter_material_e_classe_validacao()
+        self.console_val_relatorio.append(f"Cupom Identificado: {id_amostra}")
+        self.console_val_relatorio.append(f"Material Real Alvo: {mat_real}")
+        self.console_val_relatorio.append(f"Classe Real Alvo: {cls_real}")
+        self.console_val_relatorio.append(f"Total de Amostras Lidas: {self.val_samples_captured}")
+        
+        if self.val_samples_captured == 0:
+            self.console_val_relatorio.append("\n[AVISO] Nenhuma amostra foi capturada durante o ensaio.")
+            return
+            
+        acc_mat = (self.val_mat_matches / self.val_samples_captured) * 100
+        acc_cls = (self.val_cls_matches / self.val_samples_captured) * 100
+        
+        self.console_val_relatorio.append(f"\n--- Desempenho do Classificador (IA) ---")
+        self.console_val_relatorio.append(f"* Acurácia de Material: {acc_mat:.1f}% ({self.val_mat_matches}/{self.val_samples_captured})")
+        self.console_val_relatorio.append(f"* Acurácia de Classe: {acc_cls:.1f}% ({self.val_cls_matches}/{self.val_samples_captured})")
+        
+        taus = [d["tau"] for d in self.val_test_data if d["tau"] > 0]
+        aucs = [d["auc"] for d in self.val_test_data]
+        
+        if taus:
+            self.console_val_relatorio.append(f"\n--- Métricas Estatísticas do Ensaio ---")
+            self.console_val_relatorio.append(f"* Tau Médio (μs): {np.mean(taus):.4f} (DP: {np.std(taus)*1000:.2f} ns)")
+            self.console_val_relatorio.append(f"* AUC Média: {np.mean(aucs):.1f} (DP: {np.std(aucs):.1f})")
+            
+        self.console_val_relatorio.append("\n>>> Resultados salvos em 'testes_validacao_ia.csv' <<<")
+
+    def processar_leitura_validacao(self, tau, auc, mat_prev, cls_prev, confianca, valores):
+        self.val_samples_captured += 1
+        
+        id_amostra = self.edit_val_id.text().strip()
+        mat_real, cls_real = self.obter_material_e_classe_validacao()
+        
+        mat_match = (mat_prev == mat_real)
+        cls_match = (cls_prev == cls_real)
+        
+        if mat_match:
+            self.val_mat_matches += 1
+        if cls_match:
+            self.val_cls_matches += 1
+            
+        self.val_test_data.append({
+            "tau": tau,
+            "auc": auc
+        })
+        
+        self.lbl_c1_val.setText(str(self.val_samples_captured))
+        acc_mat = (self.val_mat_matches / self.val_samples_captured) * 100
+        acc_cls = (self.val_cls_matches / self.val_samples_captured) * 100
+        self.lbl_c2_val.setText(f"{acc_mat:.1f}%")
+        self.lbl_c3_val.setText(f"{acc_cls:.1f}%")
+        
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            escrever_cabecalho = not os.path.exists(self.arquivo_csv_validacao)
+            with open(self.arquivo_csv_validacao, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f, delimiter=";")
+                if escrever_cabecalho:
+                    cabecalho = ["timestamp", "id_amostra", "material_real", "classe_real", 
+                                 "tau_medido", "auc_medido", "material_previsto", "classe_prevista", 
+                                 "confianca_prevista", "dt_us"] + [f"p_{i}" for i in range(256)]
+                    writer.writerow(cabecalho)
+                
+                linha = [timestamp, id_amostra, mat_real, cls_real, 
+                         f"{tau:.4f}", f"{auc:.1f}", mat_prev, cls_prev, 
+                         f"{confianca:.1f}", f"{self.dt_us}"] + valores
+                writer.writerow(linha)
+        except Exception as e:
+            print(f"[ERRO VALIDACAO] Falha ao gravar CSV: {e}")
+            
+        row_idx = self.tbl_val_resultados.rowCount()
+        self.tbl_val_resultados.insertRow(row_idx)
+        
+        tempo_s = self.val_test_elapsed / 1000.0 if self.val_test_duration > 0 else (row_idx * 0.03)
+        match_str = "SIM" if (mat_match and cls_match) else "NÃO"
+        
+        self.tbl_val_resultados.setItem(row_idx, 0, QtWidgets.QTableWidgetItem(str(self.val_samples_captured)))
+        self.tbl_val_resultados.setItem(row_idx, 1, QtWidgets.QTableWidgetItem(f"{tempo_s:.1f}"))
+        self.tbl_val_resultados.setItem(row_idx, 2, QtWidgets.QTableWidgetItem(f"{tau:.2f}"))
+        self.tbl_val_resultados.setItem(row_idx, 3, QtWidgets.QTableWidgetItem(f"{auc:.1f}"))
+        self.tbl_val_resultados.setItem(row_idx, 4, QtWidgets.QTableWidgetItem(mat_real))
+        self.tbl_val_resultados.setItem(row_idx, 5, QtWidgets.QTableWidgetItem(mat_prev))
+        self.tbl_val_resultados.setItem(row_idx, 6, QtWidgets.QTableWidgetItem(cls_real))
+        self.tbl_val_resultados.setItem(row_idx, 7, QtWidgets.QTableWidgetItem(cls_prev))
+        
+        match_item = QtWidgets.QTableWidgetItem(match_str)
+        if match_str == "SIM":
+            match_item.setBackground(QtGui.QColor(39, 174, 96, 60))
+        else:
+            match_item.setBackground(QtGui.QColor(192, 57, 43, 60))
+        self.tbl_val_resultados.setItem(row_idx, 8, match_item)
+        self.tbl_val_resultados.scrollToBottom()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+
+
+# =====================================================================
+# INICIALIZAÇÃO DO APLICATIVO QT FUSION
+# =====================================================================
+if __name__ == "__main__":
+    app = QtWidgets.QApplication(sys.argv)
+    
+    # Define o tema Fusion para a interface PyQt
+    app.setStyle("Fusion")
+    
+    # Paleta de cores escura personalizada (Premium Dark Theme)
+    dark_palette = QtGui.QPalette()
+    dark_palette.setColor(QtGui.QPalette.Window, QtGui.QColor(30, 30, 34))
+    dark_palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
+    dark_palette.setColor(QtGui.QPalette.Base, QtGui.QColor(20, 20, 22))
+    dark_palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(42, 42, 48))
+    dark_palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(45, 45, 50))
+    dark_palette.setColor(QtGui.QPalette.ToolTipText, QtCore.Qt.white)
+    dark_palette.setColor(QtGui.QPalette.Text, QtCore.Qt.white)
+    dark_palette.setColor(QtGui.QPalette.Button, QtGui.QColor(45, 45, 50))
+    dark_palette.setColor(QtGui.QPalette.ButtonText, QtCore.Qt.white)
+    dark_palette.setColor(QtGui.QPalette.BrightText, QtCore.Qt.red)
+    dark_palette.setColor(QtGui.QPalette.Link, QtGui.QColor(42, 130, 218))
+    dark_palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(42, 130, 218))
+    dark_palette.setColor(QtGui.QPalette.HighlightedText, QtCore.Qt.black)
+    app.setPalette(dark_palette)
+
+    # Força a estilização do QToolTip via folha de estilos para garantir visibilidade total do texto branco
+    app.setStyleSheet("""
+        QToolTip {
+            color: #ffffff;
+            background-color: #2e2e32;
+            border: 1px solid #55555a;
+            padding: 4px;
+            font-size: 10pt;
+            font-family: 'Segoe UI', Arial, sans-serif;
+        }
+    """)
+
+    plotter = EddyCurrentPlotter()
+    plotter.show()
+    sys.exit(app.exec_())
