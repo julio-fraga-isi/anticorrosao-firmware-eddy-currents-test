@@ -210,7 +210,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.dt_us = 0.1  # Padrão calibrado: 10 MSPS (ADC a 96/80 MHz, 16-bit, oversampling desativado)
         self.arquivo_csv = "dataset_cupons_indutancia.csv"
         
-
+        # Gerenciamento de materiais customizados
+        self.arquivo_materiais_config = "materiais_customizados.txt"
+        self.custom_materials = self.carregar_lista_materiais()
+        self.todos_materiais = ["A36 Comum", "A36 GE", "A36 GF"] + self.custom_materials + ["Ar Livre"]
+        self.radio_buttons_material = {}
+        self.val_radio_buttons_material = {}
+        self.filter_checkboxes_material = {}
         
         # Histórico de leituras (Deques para o gráfico de tendência em tempo real)
         self.trend_tau = deque(maxlen=MAX_TREND_POINTS)
@@ -432,36 +438,45 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 background-color: #2ecc71;
             }
         """
-        self.rad_mat_comum = QtWidgets.QRadioButton("A36 Comum")
-        self.rad_mat_ge = QtWidgets.QRadioButton("A36 GE")
-        self.rad_mat_gf = QtWidgets.QRadioButton("A36 GF")
-        self.rad_mat_ar = QtWidgets.QRadioButton("Ar Livre")
-        
-        self.rad_mat_comum.setStyleSheet(radio_stylesheet)
-        self.rad_mat_ge.setStyleSheet(radio_stylesheet)
-        self.rad_mat_gf.setStyleSheet(radio_stylesheet)
-        self.rad_mat_ar.setStyleSheet(radio_stylesheet)
-        
+        self.radio_stylesheet = radio_stylesheet
         self.group_mat = QtWidgets.QButtonGroup(self)
-        self.group_mat.addButton(self.rad_mat_comum)
-        self.group_mat.addButton(self.rad_mat_ge)
-        self.group_mat.addButton(self.rad_mat_gf)
-        self.group_mat.addButton(self.rad_mat_ar)
+
+        # Grid para RadioButtons de Material (Dinâmico)
+        self.widget_mat_radios = QtWidgets.QWidget()
+        self.layout_mat_radios = QtWidgets.QGridLayout(self.widget_mat_radios)
+        self.layout_mat_radios.setContentsMargins(0, 0, 0, 0)
+        self.layout_mat_radios.setSpacing(6)
         
-        self.rad_mat_comum.setChecked(True)
+        # Container principal de Material (Aba 1)
+        widget_mat_container = QtWidgets.QWidget()
+        layout_mat_container = QtWidgets.QVBoxLayout(widget_mat_container)
+        layout_mat_container.setContentsMargins(0, 5, 0, 5)
+        layout_mat_container.setSpacing(8)
+        layout_mat_container.addWidget(self.widget_mat_radios)
         
-        # Grid para RadioButtons de Material
-        widget_mat_radios = QtWidgets.QWidget()
-        layout_mat_radios = QtWidgets.QGridLayout(widget_mat_radios)
-        layout_mat_radios.setContentsMargins(0, 5, 0, 5)
-        layout_mat_radios.setSpacing(6)
+        # Controles para Adicionar/Remover material customizado
+        layout_mat_controles = QtWidgets.QHBoxLayout()
+        layout_mat_controles.setSpacing(4)
         
-        layout_mat_radios.addWidget(self.rad_mat_comum, 0, 0)
-        layout_mat_radios.addWidget(self.rad_mat_ge, 0, 1)
-        layout_mat_radios.addWidget(self.rad_mat_gf, 1, 0)
-        layout_mat_radios.addWidget(self.rad_mat_ar, 1, 1)
+        self.edit_novo_material = QtWidgets.QLineEdit()
+        self.edit_novo_material.setPlaceholderText("Novo Material...")
+        self.edit_novo_material.setStyleSheet("background-color: #2e2e32; color: white; border: 1px solid #3a3a3c; border-radius: 4px; padding: 4px; font-size: 8pt;")
+        self.edit_novo_material.setMaximumWidth(150)
         
-        group_record_layout.addWidget(widget_mat_radios, 1, 1)
+        self.btn_add_material = QtWidgets.QPushButton("+ Add")
+        self.btn_add_material.clicked.connect(self.adicionar_material_customizado)
+        self.btn_add_material.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 8pt; border-radius: 4px; padding: 4px;")
+        
+        self.btn_del_material = QtWidgets.QPushButton("- Del")
+        self.btn_del_material.clicked.connect(self.remover_material_selecionado)
+        self.btn_del_material.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; font-size: 8pt; border-radius: 4px; padding: 4px;")
+        
+        layout_mat_controles.addWidget(self.edit_novo_material)
+        layout_mat_controles.addWidget(self.btn_add_material)
+        layout_mat_controles.addWidget(self.btn_del_material)
+        layout_mat_container.addLayout(layout_mat_controles)
+        
+        group_record_layout.addWidget(widget_mat_container, 1, 1)
 
         # Label de Classe
         lbl_cls = QtWidgets.QLabel("Classe:")
@@ -508,7 +523,6 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         group_record_layout.addWidget(widget_cls_radios, 2, 1)
 
         # Conecta eventos para coerência Ar Livre
-        self.rad_mat_ar.toggled.connect(self.ao_toggle_ar_livre_material)
         self.rad_cls_ar.toggled.connect(self.ao_toggle_ar_livre_classe)
 
         # Novo Checkbox para gravar Média Móvel da curva em vez do dado instantâneo
@@ -774,21 +788,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             }
         """)
 
-        # Filtros de Materiais
+        # Filtros de Materiais (Dinâmico)
         group_filters_layout.addWidget(QtWidgets.QLabel("<b>Materiais:</b>"), 0, 0)
-        self.chk_filter_comum = QtWidgets.QCheckBox("A36 Comum")
-        self.chk_filter_comum.setChecked(True)
-        self.chk_filter_ge = QtWidgets.QCheckBox("A36 GE")
-        self.chk_filter_ge.setChecked(True)
-        self.chk_filter_gf = QtWidgets.QCheckBox("A36 GF")
-        self.chk_filter_gf.setChecked(True)
-        self.chk_filter_ar_mat = QtWidgets.QCheckBox("Ar Livre")
-        self.chk_filter_ar_mat.setChecked(True)
-
-        group_filters_layout.addWidget(self.chk_filter_comum, 1, 0)
-        group_filters_layout.addWidget(self.chk_filter_ge, 2, 0)
-        group_filters_layout.addWidget(self.chk_filter_gf, 3, 0)
-        group_filters_layout.addWidget(self.chk_filter_ar_mat, 4, 0)
+        self.widget_filter_materiais = QtWidgets.QWidget()
+        self.layout_filter_materiais = QtWidgets.QVBoxLayout(self.widget_filter_materiais)
+        self.layout_filter_materiais.setContentsMargins(0, 5, 0, 5)
+        self.layout_filter_materiais.setSpacing(6)
+        group_filters_layout.addWidget(self.widget_filter_materiais, 1, 0, 6, 1)
 
         # Filtros de Classes
         group_filters_layout.addWidget(QtWidgets.QLabel("<b>Classes:</b>"), 0, 1)
@@ -817,10 +823,6 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         group_filters_layout.addWidget(self.chk_filter_outliers, 7, 0, 1, 2)
 
         # Conecta os sinais de mudança para atualizar os gráficos dinamicamente
-        self.chk_filter_comum.stateChanged.connect(self.atualizar_graficos_estatisticos)
-        self.chk_filter_ge.stateChanged.connect(self.atualizar_graficos_estatisticos)
-        self.chk_filter_gf.stateChanged.connect(self.atualizar_graficos_estatisticos)
-        self.chk_filter_ar_mat.stateChanged.connect(self.atualizar_graficos_estatisticos)
         self.chk_filter_saudavel.stateChanged.connect(self.atualizar_graficos_estatisticos)
         self.chk_filter_leve.stateChanged.connect(self.atualizar_graficos_estatisticos)
         self.chk_filter_moderada.stateChanged.connect(self.atualizar_graficos_estatisticos)
@@ -994,38 +996,17 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         val_cupom_layout.addWidget(lbl_val_id, 0, 0)
         val_cupom_layout.addWidget(self.edit_val_id, 0, 1)
         
-        # Material Real (RadioButtons)
+        # Material Real (RadioButtons - Dinâmico)
         lbl_val_mat = QtWidgets.QLabel("Material Real:")
         lbl_val_mat.setStyleSheet("font-weight: bold; color: #a0a0b2;")
         val_cupom_layout.addWidget(lbl_val_mat, 1, 0)
         
-        widget_val_mat_radios = QtWidgets.QWidget()
-        layout_val_mat_radios = QtWidgets.QGridLayout(widget_val_mat_radios)
-        layout_val_mat_radios.setContentsMargins(0, 5, 0, 5)
-        layout_val_mat_radios.setSpacing(6)
-        
-        self.rad_val_mat_comum = QtWidgets.QRadioButton("A36 Comum")
-        self.rad_val_mat_ge = QtWidgets.QRadioButton("A36 GE")
-        self.rad_val_mat_gf = QtWidgets.QRadioButton("A36 GF")
-        self.rad_val_mat_ar = QtWidgets.QRadioButton("Ar Livre")
-        
-        self.rad_val_mat_comum.setStyleSheet(radio_stylesheet)
-        self.rad_val_mat_ge.setStyleSheet(radio_stylesheet)
-        self.rad_val_mat_gf.setStyleSheet(radio_stylesheet)
-        self.rad_val_mat_ar.setStyleSheet(radio_stylesheet)
-        
+        self.widget_val_mat_radios = QtWidgets.QWidget()
+        self.layout_val_mat_radios = QtWidgets.QGridLayout(self.widget_val_mat_radios)
+        self.layout_val_mat_radios.setContentsMargins(0, 5, 0, 5)
+        self.layout_val_mat_radios.setSpacing(6)
+        val_cupom_layout.addWidget(self.widget_val_mat_radios, 1, 1)
         self.group_val_mat = QtWidgets.QButtonGroup(self)
-        self.group_val_mat.addButton(self.rad_val_mat_comum)
-        self.group_val_mat.addButton(self.rad_val_mat_ge)
-        self.group_val_mat.addButton(self.rad_val_mat_gf)
-        self.group_val_mat.addButton(self.rad_val_mat_ar)
-        self.rad_val_mat_comum.setChecked(True)
-        
-        layout_val_mat_radios.addWidget(self.rad_val_mat_comum, 0, 0)
-        layout_val_mat_radios.addWidget(self.rad_val_mat_ge, 0, 1)
-        layout_val_mat_radios.addWidget(self.rad_val_mat_gf, 1, 0)
-        layout_val_mat_radios.addWidget(self.rad_val_mat_ar, 1, 1)
-        val_cupom_layout.addWidget(widget_val_mat_radios, 1, 1)
         
         # Classe Real (RadioButtons)
         lbl_val_cls = QtWidgets.QLabel("Classe Real:")
@@ -1069,7 +1050,6 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         val_cupom_layout.addWidget(widget_val_cls_radios, 2, 1)
         
         # Conecta eventos Ar Livre
-        self.rad_val_mat_ar.toggled.connect(self.ao_toggle_ar_livre_val_material)
         self.rad_val_cls_ar.toggled.connect(self.ao_toggle_ar_livre_val_classe)
         
         val_scroll_layout.addWidget(group_val_cupom)
@@ -1260,6 +1240,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         val_right_layout.addWidget(self.console_val_relatorio, 1)
         
         tab_val_layout.addWidget(val_right)
+        
+        # Reconstrói a lista dinâmica de materiais no início
+        self.atualizar_widgets_materiais()
 
     def ajustar_viewbox_secundaria(self):
         # Ajusta a escala da ViewBox secundária (AUC) para coincidir com o tamanho do gráfico
@@ -1799,14 +1782,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
     def obter_material_e_classe_selecionados(self):
         # Material
-        if self.rad_mat_comum.isChecked():
-            material = "A36 Comum"
-        elif self.rad_mat_ge.isChecked():
-            material = "A36 GE"
-        elif self.rad_mat_gf.isChecked():
-            material = "A36 GF"
-        else:
-            material = "Ar Livre"
+        material = "A36 Comum"
+        for mat_nome, rad in self.radio_buttons_material.items():
+            if rad.isChecked():
+                material = mat_nome
+                break
 
         # Classe
         if self.rad_cls_saudavel.isChecked():
@@ -1833,10 +1813,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 
     def ao_toggle_ar_livre_classe(self, checked):
         if checked:
-            self.rad_mat_ar.setChecked(True)
+            if "Ar Livre" in self.radio_buttons_material:
+                self.radio_buttons_material["Ar Livre"].setChecked(True)
         else:
-            if self.rad_mat_ar.isChecked():
-                self.rad_mat_comum.setChecked(True)
+            if "Ar Livre" in self.radio_buttons_material and self.radio_buttons_material["Ar Livre"].isChecked():
+                self.radio_buttons_material["A36 Comum"].setChecked(True)
 
     def salvar_dados_em_csv(self):
         if self.last_valores is None:
@@ -2234,10 +2215,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         # 2. Identifica quais filtros de Materiais e Classes estão ativos
         materiais_ativos = []
-        if self.chk_filter_comum.isChecked(): materiais_ativos.append("A36 Comum")
-        if self.chk_filter_ge.isChecked(): materiais_ativos.append("A36 GE")
-        if self.chk_filter_gf.isChecked(): materiais_ativos.append("A36 GF")
-        if self.chk_filter_ar_mat.isChecked(): materiais_ativos.append("Ar Livre")
+        for mat_nome, chk in self.filter_checkboxes_material.items():
+            if chk.isChecked():
+                materiais_ativos.append(mat_nome)
         
         classes_ativas = []
         if self.chk_filter_saudavel.isChecked(): classes_ativas.append("Saudável")
@@ -2549,6 +2529,142 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if self.tooltip_estatistico.isVisible():
                 self.tooltip_estatistico.hide()
 
+    def carregar_lista_materiais(self):
+        if os.path.exists(self.arquivo_materiais_config):
+            try:
+                with open(self.arquivo_materiais_config, "r", encoding="utf-8") as f:
+                    return [line.strip() for line in f if line.strip()]
+            except Exception as e:
+                print(f"[MATERIAIS] Erro ao ler materiais customizados: {e}")
+        return []
+
+    def salvar_lista_materiais(self):
+        try:
+            with open(self.arquivo_materiais_config, "w", encoding="utf-8") as f:
+                for mat in self.custom_materials:
+                    f.write(f"{mat}\n")
+        except Exception as e:
+            print(f"[MATERIAIS] Erro ao salvar materiais customizados: {e}")
+
+    def adicionar_material_customizado(self):
+        novo_nome = self.edit_novo_material.text().strip()
+        if not novo_nome:
+            QtWidgets.QMessageBox.warning(self, "Nome Vazio", "Por favor, insira o nome do novo material!")
+            return
+            
+        if ";" in novo_nome or "\n" in novo_nome:
+            QtWidgets.QMessageBox.warning(self, "Caracter Inválido", "O nome do material não pode conter ponto e vírgula ';' ou quebras de linha!")
+            return
+            
+        if novo_nome in ["A36 Comum", "A36 GE", "A36 GF", "Ar Livre"] or novo_nome in self.custom_materials:
+            QtWidgets.QMessageBox.warning(self, "Material Existente", f"O material '{novo_nome}' já existe na interface!")
+            return
+            
+        self.custom_materials.append(novo_nome)
+        self.salvar_lista_materiais()
+        self.atualizar_widgets_materiais()
+        self.edit_novo_material.clear()
+        
+        if novo_nome in self.radio_buttons_material:
+            self.radio_buttons_material[novo_nome].setChecked(True)
+            
+        QtWidgets.QMessageBox.information(self, "Sucesso", f"Material '{novo_nome}' adicionado com sucesso!")
+
+    def remover_material_selecionado(self):
+        material_a_remover = self.obter_material_e_classe_selecionados()[0]
+        if material_a_remover in ["A36 Comum", "A36 GE", "A36 GF", "Ar Livre"]:
+            QtWidgets.QMessageBox.warning(self, "Ação Proibida", "Não é permitido excluir os materiais padrão do sistema.")
+            return
+            
+        resposta = QtWidgets.QMessageBox.question(
+            self, 
+            "Excluir Material", 
+            f"Tem certeza de que deseja excluir o material '{material_a_remover}'?\nEsta ação não removerá os dados antigos do CSV, mas o material não aparecerá mais nos controles da interface.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        if resposta == QtWidgets.QMessageBox.Yes:
+            if material_a_remover in self.custom_materials:
+                self.custom_materials.remove(material_a_remover)
+                self.salvar_lista_materiais()
+                self.atualizar_widgets_materiais()
+                self.radio_buttons_material["A36 Comum"].setChecked(True)
+                QtWidgets.QMessageBox.information(self, "Sucesso", f"Material '{material_a_remover}' removido!")
+
+    def atualizar_widgets_materiais(self):
+        self.todos_materiais = ["A36 Comum", "A36 GE", "A36 GF"] + self.custom_materials + ["Ar Livre"]
+        
+        # --- ABA 1 (AQUISIÇÃO) ---
+        while self.layout_mat_radios.count():
+            child = self.layout_mat_radios.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+                
+        for btn in list(self.group_mat.buttons()):
+            self.group_mat.removeButton(btn)
+            
+        self.radio_buttons_material.clear()
+        
+        for idx, mat_nome in enumerate(self.todos_materiais):
+            rad = QtWidgets.QRadioButton(mat_nome)
+            rad.setStyleSheet(self.radio_stylesheet)
+            self.group_mat.addButton(rad)
+            self.radio_buttons_material[mat_nome] = rad
+            
+            row = idx // 2
+            col = idx % 2
+            self.layout_mat_radios.addWidget(rad, row, col)
+            
+            if mat_nome == "Ar Livre":
+                rad.toggled.connect(self.ao_toggle_ar_livre_material)
+                
+        if "A36 Comum" in self.radio_buttons_material:
+            self.radio_buttons_material["A36 Comum"].setChecked(True)
+            
+        # --- ABA 2 (ESTATÍSTICA) ---
+        if hasattr(self, 'layout_filter_materiais'):
+            while self.layout_filter_materiais.count():
+                child = self.layout_filter_materiais.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+                    
+            self.filter_checkboxes_material.clear()
+            
+            for mat_nome in self.todos_materiais:
+                chk = QtWidgets.QCheckBox(mat_nome)
+                chk.setChecked(True)
+                chk.setStyleSheet("font-size: 9pt; color: #e1e1e6;")
+                chk.stateChanged.connect(self.atualizar_graficos_estatisticos)
+                self.filter_checkboxes_material[mat_nome] = chk
+                self.layout_filter_materiais.addWidget(chk)
+                
+        # --- ABA 3 (VALIDAÇÃO) ---
+        if hasattr(self, 'layout_val_mat_radios'):
+            while self.layout_val_mat_radios.count():
+                child = self.layout_val_mat_radios.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+                    
+            for btn in list(self.group_val_mat.buttons()):
+                self.group_val_mat.removeButton(btn)
+                
+            self.val_radio_buttons_material.clear()
+            
+            for idx, mat_nome in enumerate(self.todos_materiais):
+                rad = QtWidgets.QRadioButton(mat_nome)
+                rad.setStyleSheet(self.radio_stylesheet)
+                self.group_val_mat.addButton(rad)
+                self.val_radio_buttons_material[mat_nome] = rad
+                
+                row = idx // 2
+                col = idx % 2
+                self.layout_val_mat_radios.addWidget(rad, row, col)
+                
+                if mat_nome == "Ar Livre":
+                    rad.toggled.connect(self.ao_toggle_ar_livre_val_material)
+                    
+            if "A36 Comum" in self.val_radio_buttons_material:
+                self.val_radio_buttons_material["A36 Comum"].setChecked(True)
+
     def ao_toggle_ar_livre_val_material(self, checked):
         if checked:
             self.rad_val_cls_ar.blockSignals(True)
@@ -2557,19 +2673,18 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
     def ao_toggle_ar_livre_val_classe(self, checked):
         if checked:
-            self.rad_val_mat_ar.blockSignals(True)
-            self.rad_val_mat_ar.setChecked(True)
-            self.rad_val_mat_ar.blockSignals(False)
+            if "Ar Livre" in self.val_radio_buttons_material:
+                rad = self.val_radio_buttons_material["Ar Livre"]
+                rad.blockSignals(True)
+                rad.setChecked(True)
+                rad.blockSignals(False)
 
     def obter_material_e_classe_validacao(self):
-        if self.rad_val_mat_comum.isChecked():
-            material = "A36 Comum"
-        elif self.rad_val_mat_ge.isChecked():
-            material = "A36 GE"
-        elif self.rad_val_mat_gf.isChecked():
-            material = "A36 GF"
-        else:
-            material = "Ar Livre"
+        material = "A36 Comum"
+        for mat_nome, rad in self.val_radio_buttons_material.items():
+            if rad.isChecked():
+                material = mat_nome
+                break
             
         if self.rad_val_cls_saudavel.isChecked():
             classe = "Saudável"
@@ -2627,10 +2742,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         self.edit_val_id.setEnabled(False)
         self.combo_val_duracao.setEnabled(False)
-        self.rad_val_mat_comum.setEnabled(False)
-        self.rad_val_mat_ge.setEnabled(False)
-        self.rad_val_mat_gf.setEnabled(False)
-        self.rad_val_mat_ar.setEnabled(False)
+        for rad in self.val_radio_buttons_material.values():
+            rad.setEnabled(False)
         self.rad_val_cls_saudavel.setEnabled(False)
         self.rad_val_cls_leve.setEnabled(False)
         self.rad_val_cls_moderada.setEnabled(False)
@@ -2682,10 +2795,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         self.edit_val_id.setEnabled(True)
         self.combo_val_duracao.setEnabled(True)
-        self.rad_val_mat_comum.setEnabled(True)
-        self.rad_val_mat_ge.setEnabled(True)
-        self.rad_val_mat_gf.setEnabled(True)
-        self.rad_val_mat_ar.setEnabled(True)
+        for rad in self.val_radio_buttons_material.values():
+            rad.setEnabled(True)
         self.rad_val_cls_saudavel.setEnabled(True)
         self.rad_val_cls_leve.setEnabled(True)
         self.rad_val_cls_moderada.setEnabled(True)
