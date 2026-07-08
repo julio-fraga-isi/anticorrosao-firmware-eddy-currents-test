@@ -394,7 +394,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.spin_dt = QtWidgets.QDoubleSpinBox()
         self.spin_dt.setDecimals(5)
         self.spin_dt.setRange(0.00001, 10000.0)
-        self.spin_dt.setSingleStep(0.1)
+        self.spin_dt.setSingleStep(0.354)
         self.spin_dt.setValue(self.dt_us)
         self.spin_dt.valueChanged.connect(self.atualizar_dt_us)
         self.spin_dt.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
@@ -1241,6 +1241,130 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         tab_val_layout.addWidget(val_right)
         
+        # =====================================================================
+        # ABA 4: Diagnóstico Físico & IA (Tempo Real)
+        # =====================================================================
+        self.tab_diag = QtWidgets.QWidget()
+        self.tab_widget.addTab(self.tab_diag, "Diagnóstico Físico & IA (TR)")
+        tab_diag_layout = QtWidgets.QHBoxLayout(self.tab_diag)
+        
+        # Sub-painel Esquerdo: Controles e Cards em Tempo Real
+        diag_left = QtWidgets.QWidget()
+        diag_left.setMaximumWidth(420)
+        diag_left_layout = QtWidgets.QVBoxLayout(diag_left)
+        diag_left_layout.setContentsMargins(0, 0, 0, 0)
+        diag_left_layout.setSpacing(12)
+        
+        # Botão de Trigger Rápido
+        self.btn_diag_trigger = QtWidgets.QPushButton("Iniciar Leitura Contínua")
+        self.btn_diag_trigger.setMinimumHeight(50)
+        self.btn_diag_trigger.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
+        self.btn_diag_trigger.clicked.connect(self.alternar_trigger_diagnostico)
+        diag_left_layout.addWidget(self.btn_diag_trigger)
+        
+        # Card de Classificação em Tempo Real
+        group_diag_status = QtWidgets.QGroupBox("Resultado IA em Tempo Real")
+        group_diag_status.setStyleSheet("""
+            QGroupBox {
+                border: 2px solid #3a3a3c;
+                border-radius: 8px;
+                margin-top: 15px;
+                font-weight: bold;
+                color: #f1c40f;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        diag_status_layout = QtWidgets.QVBoxLayout(group_diag_status)
+        diag_status_layout.setSpacing(10)
+        
+        # Labels de diagnóstico
+        self.lbl_diag_material = QtWidgets.QLabel("Material: ---")
+        self.lbl_diag_material.setStyleSheet("font-size: 13pt; font-weight: bold; color: white;")
+        self.lbl_diag_classe = QtWidgets.QLabel("Classe: ---")
+        self.lbl_diag_classe.setStyleSheet("font-size: 13pt; font-weight: bold; color: #7f8c8d;")
+        self.lbl_diag_confianca = QtWidgets.QLabel("Confiança: ---")
+        self.lbl_diag_confianca.setStyleSheet("font-size: 11pt; color: #a0a0b2;")
+        
+        diag_status_layout.addWidget(self.lbl_diag_material)
+        diag_status_layout.addWidget(self.lbl_diag_classe)
+        diag_status_layout.addWidget(self.lbl_diag_confianca)
+        diag_left_layout.addWidget(group_diag_status)
+        
+        # Card de Métricas Físicas
+        group_diag_metrics = QtWidgets.QGroupBox("Métricas Físicas do Sinal")
+        group_diag_metrics.setStyleSheet("""
+            QGroupBox {
+                border: 2px solid #3a3a3c;
+                border-radius: 8px;
+                margin-top: 15px;
+                font-weight: bold;
+                color: #3498db;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        diag_metrics_layout = QtWidgets.QVBoxLayout(group_diag_metrics)
+        diag_metrics_layout.setSpacing(10)
+        
+        self.lbl_diag_tau = QtWidgets.QLabel("Tau (\u03bcs): ---")
+        self.lbl_diag_tau.setStyleSheet("font-size: 11pt; color: white;")
+        self.lbl_diag_auc = QtWidgets.QLabel("AUC: ---")
+        self.lbl_diag_auc.setStyleSheet("font-size: 11pt; color: white;")
+        self.lbl_diag_r2 = QtWidgets.QLabel("R\u00b2: ---")
+        self.lbl_diag_r2.setStyleSheet("font-size: 11pt; color: white;")
+        
+        diag_metrics_layout.addWidget(self.lbl_diag_tau)
+        diag_metrics_layout.addWidget(self.lbl_diag_auc)
+        diag_metrics_layout.addWidget(self.lbl_diag_r2)
+        diag_left_layout.addWidget(group_diag_metrics)
+        
+        # Espaçador vertical para empurrar os widgets para o topo
+        diag_left_layout.addStretch()
+        tab_diag_layout.addWidget(diag_left)
+        
+        # Sub-painel Direito: Gráficos de Diagnóstico em Tempo Real
+        self.win_diag_plots = pg.GraphicsLayoutWidget()
+        self.win_diag_plots.setStyleSheet("background-color: #121214; border: 1px solid #3a3a3c;")
+        tab_diag_layout.addWidget(self.win_diag_plots, 1)
+        
+        # Configurar subplots da aba de diagnóstico
+        self.plot_diag_curves = self.win_diag_plots.addPlot(title="Decaimento Comparativo: Ativo vs. Banco de Dados")
+        self.plot_diag_curves.addLegend(offset=(10, 10))
+        self.plot_diag_curves.showGrid(x=True, y=True)
+        self.plot_diag_curves.setLabel('left', 'Delta Counts')
+        self.plot_diag_curves.setLabel('bottom', 'Tempo', 'us')
+        
+        self.plot_diag_auc = self.win_diag_plots.addPlot(title="Distribuição AUC com Indicador de Leitura")
+        self.plot_diag_auc.showGrid(x=True, y=True)
+        self.plot_diag_auc.setLabel('left', 'AUC')
+        
+        self.win_diag_plots.nextRow()
+        
+        self.plot_diag_tau = self.win_diag_plots.addPlot(title="Distribuição Tau com Indicador de Leitura")
+        self.plot_diag_tau.showGrid(x=True, y=True)
+        self.plot_diag_tau.setLabel('left', 'Tau', 'us')
+        
+        self.plot_diag_scatter = self.win_diag_plots.addPlot(title="Espaço de Características: Ativo vs. DB")
+        self.plot_diag_scatter.showGrid(x=True, y=True)
+        self.plot_diag_scatter.setLabel('left', 'AUC')
+        self.plot_diag_scatter.setLabel('bottom', 'Tau', 'us')
+        
+        # Conecta sinal de mudança de aba para carregar/atualizar os gráficos da Aba 4
+        self.tab_widget.currentChanged.connect(self.ao_mudar_aba)
+        
+        # Variáveis para armazenar referências das curvas de banco de dados plotadas na Aba 4
+        self.diag_active_curve = None
+        self.diag_active_scatter = None
+        self.diag_active_auc_line = None
+        self.diag_active_tau_line = None
+        
         # Reconstrói a lista dinâmica de materiais no início
         self.atualizar_widgets_materiais()
 
@@ -1248,6 +1372,179 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Ajusta a escala da ViewBox secundária (AUC) para coincidir com o tamanho do gráfico
         self.trend_auc_axis.setGeometry(self.plot_trend.vb.sceneBoundingRect())
         self.trend_auc_axis.linkedViewChanged(self.plot_trend.vb, pg.ViewBox.XAxis)
+
+    # =====================================================================
+    # LÓGICA DA ABA 4: DIAGNÓSTICO EM TEMPO REAL
+    # =====================================================================
+    def ao_mudar_aba(self, index):
+        # Se for a Aba 4 (Diagnóstico em Tempo Real), inicializa
+        if index == 3:
+            self.inicializar_graficos_diagnostico()
+            
+            # Sincroniza o botão de trigger da Aba 4 com o estado do auto_trigger
+            if self.chk_auto_trigger.isChecked():
+                self.btn_diag_trigger.setText("Pausar Diagnóstico")
+                self.btn_diag_trigger.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
+            else:
+                self.btn_diag_trigger.setText("Iniciar Diagnóstico")
+                self.btn_diag_trigger.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
+
+    def alternar_trigger_diagnostico(self):
+        if not self.serial_thread.running:
+            QtWidgets.QMessageBox.warning(self, "Sem Conexão", "Por favor, conecte a placa na porta serial primeiro!")
+            return
+            
+        # Inverte o estado do Auto-Trigger
+        novo_estado = not self.chk_auto_trigger.isChecked()
+        self.chk_auto_trigger.setChecked(novo_estado)
+
+    def inicializar_graficos_diagnostico(self):
+        # Garante carregamento do banco de dados
+        if not hasattr(self, 'amostras_estatisticas') or not self.amostras_estatisticas:
+            self.rodar_analise_estatistica()
+            
+        if not hasattr(self, 'amostras_estatisticas') or not self.amostras_estatisticas:
+            return
+
+        # Limpa os plots
+        self.plot_diag_curves.clear()
+        self.plot_diag_auc.clear()
+        self.plot_diag_tau.clear()
+        self.plot_diag_scatter.clear()
+        
+        # Reseta os elementos ativos
+        self.diag_active_curve = None
+        self.diag_active_scatter = None
+        self.diag_active_auc_line = None
+        self.diag_active_tau_line = None
+        
+        # Ativa o auto-range
+        self.plot_diag_curves.enableAutoRange(x=True, y=True)
+        self.plot_diag_auc.enableAutoRange(x=True, y=True)
+        self.plot_diag_tau.enableAutoRange(x=True, y=True)
+        self.plot_diag_scatter.enableAutoRange(x=True, y=True)
+
+        CLASSES_ORDEM = ["Saudável", "Leve", "Moderada", "Avançada", "Corroído", "Ar Livre"]
+        CORES_CLASSES = {
+            "Saudável": "#3498db",  # Azul
+            "Leve": "#1abc9c",      # Ciano
+            "Moderada": "#f1c40f",  # Amarelo
+            "Avançada": "#e67e22",  # Laranja
+            "Corroído": "#e74c3c",  # Vermelho
+            "Ar Livre": "#9b59b6"   # Roxo
+        }
+        CORES_RGB = {
+            "Saudável": (52, 152, 219),
+            "Leve": (26, 188, 156),
+            "Moderada": (241, 196, 15),
+            "Avançada": (230, 126, 34),
+            "Corroído": (231, 76, 60),
+            "Ar Livre": (155, 89, 182)
+        }
+        SIMBOLOS_MATERIAIS = {
+            "A36 Comum": "o",
+            "A36 GE": "s",
+            "A36 GF": "d"
+        }
+
+        # Filtra outliers caso a caixinha do IQR esteja marcada ou por padrão
+        amostras_limpas = self.filtrar_outliers_iqr(self.amostras_estatisticas) if hasattr(self, 'filtrar_outliers_iqr') else self.amostras_estatisticas
+        
+        # Agrupa os dados
+        dados_por_classe = {c: {"auc": [], "tau": [], "curvas": []} for c in CLASSES_ORDEM}
+        for a in amostras_limpas:
+            c = a["classe"]
+            if c not in dados_por_classe:
+                dados_por_classe[c] = {"auc": [], "tau": [], "curvas": []}
+            dados_por_classe[c]["auc"].append(a["auc"])
+            dados_por_classe[c]["tau"].append(a["tau"])
+            dados_por_classe[c]["curvas"].append(a["curva"])
+
+        # 1. Curvas médias de referência
+        max_len = 150
+        t = np.arange(max_len) * self.dt_us
+        
+        if hasattr(self.plot_diag_curves, 'legend') and self.plot_diag_curves.legend is not None:
+            self.plot_diag_curves.legend.clear()
+            
+        for c in CLASSES_ORDEM:
+            curvas = dados_por_classe.get(c, {}).get("curvas", [])
+            if not curvas:
+                continue
+            
+            ajustadas = []
+            for cv in curvas:
+                if len(cv) >= max_len:
+                    ajustadas.append(cv[:max_len])
+                else:
+                    ajustadas.append(np.pad(cv, (0, max_len - len(cv)), 'constant'))
+            mean = np.mean(np.array(ajustadas), axis=0)
+            
+            color = CORES_CLASSES.get(c, "#7f8c8d")
+            self.plot_diag_curves.plot(
+                t, mean, 
+                pen=pg.mkPen(color, width=1.5, style=QtCore.Qt.DotLine), 
+                name=f"Ref: {c}"
+            )
+
+        # 2. Scatter plot do banco de dados (nuvem de pontos semi-transparente)
+        for c in CLASSES_ORDEM:
+            curvas = dados_por_classe.get(c, {}).get("curvas", [])
+            if not curvas:
+                continue
+                
+            auc_list = dados_por_classe[c]["auc"]
+            tau_list = dados_por_classe[c]["tau"]
+            rgb = CORES_RGB.get(c, (127, 140, 141))
+            
+            amostras_classe = [a for a in amostras_limpas if a["classe"] == c]
+            materiais_presentes = list(set([a["material"] for a in amostras_classe]))
+            
+            for mat_nome in materiais_presentes:
+                simbolo = SIMBOLOS_MATERIAIS.get(mat_nome, "o")
+                indices_mat = [i for i, a in enumerate(amostras_classe) if a["material"] == mat_nome]
+                if not indices_mat:
+                    continue
+                
+                tau_sub = [tau_list[i] for i in indices_mat]
+                auc_sub = [auc_list[i] for i in indices_mat]
+                
+                self.plot_diag_scatter.plot(
+                    tau_sub, auc_sub, pen=None, symbol=simbolo, symbolSize=6,
+                    symbolBrush=pg.mkBrush(rgb[0], rgb[1], rgb[2], 80),
+                    symbolPen=None
+                )
+
+        # 3. Distribuições de referência
+        ticks = []
+        x_val = 1.0
+        posicoes_classes = {}
+        for c in CLASSES_ORDEM:
+            n_amostras = len(dados_por_classe.get(c, {}).get("auc", []))
+            if n_amostras > 0:
+                ticks.append((x_val, c.capitalize()))
+                posicoes_classes[c] = x_val
+                x_val += 1.0
+                
+        self.plot_diag_auc.getAxis('bottom').setTicks([ticks])
+        self.plot_diag_tau.getAxis('bottom').setTicks([ticks])
+        
+        if posicoes_classes:
+            self.plot_diag_auc.setXRange(0.5, max(1.5, x_val - 0.5))
+            self.plot_diag_tau.setXRange(0.5, max(1.5, x_val - 0.5))
+            
+        for c, x in posicoes_classes.items():
+            dados_auc = dados_por_classe[c]["auc"]
+            dados_tau = dados_por_classe[c]["tau"]
+            color = CORES_CLASSES.get(c, "#7f8c8d")
+            
+            m_a, s_a = np.mean(dados_auc), np.std(dados_auc)
+            self.plot_diag_auc.plot([x, x], [m_a - s_a, m_a + s_a], pen=pg.mkPen(color, width=2))
+            self.plot_diag_auc.plot([x - 0.15, x + 0.15], [m_a, m_a], pen=pg.mkPen('w', width=2))
+            
+            m_t, s_t = np.mean(dados_tau), np.std(dados_tau)
+            self.plot_diag_tau.plot([x, x], [m_t - s_t, m_t + s_t], pen=pg.mkPen(color, width=2))
+            self.plot_diag_tau.plot([x - 0.15, x + 0.15], [m_t, m_t], pen=pg.mkPen('w', width=2))
 
     # =====================================================================
     # LÓGICA DE GERENCIAMENTO DE CONEXÃO
@@ -1322,9 +1619,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 return
             self.btn_single_trigger.setEnabled(False)
             self.auto_trigger_timer.start(30) # Disparos a cada 30 ms (máxima velocidade física permitida pela serial)
+            if hasattr(self, 'btn_diag_trigger'):
+                self.btn_diag_trigger.setText("Pausar Diagnóstico")
+                self.btn_diag_trigger.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
         else:
             self.auto_trigger_timer.stop()
             self.btn_single_trigger.setEnabled(True)
+            if hasattr(self, 'btn_diag_trigger'):
+                self.btn_diag_trigger.setText("Iniciar Diagnóstico")
+                self.btn_diag_trigger.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
 
     def alternar_modo_ets(self, state):
         if state == QtCore.Qt.Checked:
@@ -1693,7 +1996,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             else:
                 self.finalizar_coleta_sequencial(abortado=False)
 
-        # 6. Atualiza os gráficos
+        # 6. Atualiza os gráficos da Aba 1 (tempo real)
         self.curve_bruto.setData(valores)
         self.line_peak.setValue(peak_idx)
         self.line_offset.setValue(offset)
@@ -1702,6 +2005,78 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         tempo_dec = np.arange(len(decay_adj)) * self.dt_us
         self.curve_decay.setData(tempo_dec, decay_adj)
         self.plot_decay.setXRange(0, max(10, tempo_dec[-1]))
+        
+        # 6.5. Atualiza os gráficos da Aba 4 (Diagnóstico em Tempo Real) se estiver ativa
+        if self.tab_widget.currentIndex() == 3:
+            self.lbl_diag_material.setText(f"Material: {material_detectado}")
+            self.lbl_diag_classe.setText(f"Classe: {classe_detectada}")
+            self.lbl_diag_confianca.setText(f"Confian\u00e7a: {confianca:.1f}%")
+            self.lbl_diag_tau.setText(f"Tau (\u03bcs): {tau:.3f} \u03bcs")
+            self.lbl_diag_auc.setText(f"AUC: {auc:.1f}")
+            
+            # Calcular R² para exibir nas métricas físicas
+            try:
+                y_pred = B * t_fit + A
+                y_mean = np.mean(y_log)
+                ss_tot = np.sum((y_log - y_mean) ** 2)
+                ss_res = np.sum((y_log - y_pred) ** 2)
+                r2_val = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 1.0
+            except Exception:
+                r2_val = 0.0
+            self.lbl_diag_r2.setText(f"R\u00b2: {r2_val:.4f}")
+            
+            # Define cores dos textos com base na classe
+            cor_classe = "#2ecc71"
+            if classe_detectada == "Leve": cor_classe = "#27ae60"
+            elif classe_detectada == "Moderada": cor_classe = "#f1c40f"
+            elif classe_detectada == "Avan\u00e7ada": cor_classe = "#e67e22"
+            elif classe_detectada == "Corro\u00eddo": cor_classe = "#e74c3c"
+            elif classe_detectada == "Ar Livre": cor_classe = "#9b59b6"
+            elif classe_detectada == "Sem Dados": cor_classe = "#7f8c8d"
+            self.lbl_diag_classe.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {cor_classe};")
+            
+            # Atualiza Curva Ativa Verde Neon
+            if self.diag_active_curve is None:
+                self.diag_active_curve = self.plot_diag_curves.plot(
+                    tempo_dec, decay_adj, 
+                    pen=pg.mkPen("#00ff00", width=3.5), 
+                    name="Sinal Ativo"
+                )
+            else:
+                self.diag_active_curve.setData(tempo_dec, decay_adj)
+                
+            # Atualiza Ponto Ativo no Scatter Plot (Estrela Amarela Grande com borda branca)
+            if self.diag_active_scatter is None:
+                self.diag_active_scatter = self.plot_diag_scatter.plot(
+                    [tau], [auc], pen=None, symbol="star", symbolSize=16,
+                    symbolBrush=pg.mkBrush("#f1c40f"), symbolPen=pg.mkPen("w", width=1.5)
+                )
+            else:
+                self.diag_active_scatter.setData([tau], [auc])
+                
+            # Atualiza linhas indicadoras nas distribuições
+            CLASSES_ORDEM = ["Saud\u00e1vel", "Leve", "Moderada", "Avan\u00e7ada", "Corro\u00eddo", "Ar Livre"]
+            pos_x = None
+            x_val = 1.0
+            for c in CLASSES_ORDEM:
+                # Conta se há amostras no banco de dados para esta classe
+                n_amostras = sum(1 for a in self.amostras_estatisticas if a["classe"] == c) if hasattr(self, 'amostras_estatisticas') else 0
+                if n_amostras > 0:
+                    if c.lower() == classe_detectada.lower():
+                        pos_x = x_val
+                        break
+                    x_val += 1.0
+            
+            if pos_x is not None:
+                if self.diag_active_auc_line is None:
+                    self.diag_active_auc_line = pg.InfiniteLine(angle=0, pen=pg.mkPen("#f1c40f", width=1.5, style=QtCore.Qt.DashLine))
+                    self.plot_diag_auc.addItem(self.diag_active_auc_line)
+                self.diag_active_auc_line.setValue(auc)
+                
+                if self.diag_active_tau_line is None:
+                    self.diag_active_tau_line = pg.InfiniteLine(angle=0, pen=pg.mkPen("#f1c40f", width=1.5, style=QtCore.Qt.DashLine))
+                    self.plot_diag_tau.addItem(self.diag_active_tau_line)
+                self.diag_active_tau_line.setValue(tau)
         
         # 7. Se estiver no modo contínuo, adiciona os dados nas deques de tendência
         if self.chk_auto_trigger.isChecked():
@@ -2206,6 +2581,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.plot_stat_scatter.clear()
         self.txt_report_stats.clear()
         
+        self.plot_stat_curves.enableAutoRange(x=True, y=True)
+        self.plot_stat_auc.enableAutoRange(x=True, y=True)
+        self.plot_stat_tau.enableAutoRange(x=True, y=True)
+        self.plot_stat_scatter.enableAutoRange(x=True, y=True)
+        
         # Esconde o tooltip flutuante ao re-renderizar para evitar fantasmas
         if hasattr(self, 'tooltip_estatistico'):
             self.tooltip_estatistico.hide()
@@ -2408,7 +2788,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 amostra["pos_x_auc_plot"] = x_jitter_auc[idx_a]
                 
             # Plota cada material desta classe com seu símbolo correspondente
-            for mat_nome, simbolo in SIMBOLOS_MATERIAIS.items():
+            materiais_presentes = list(set([a["material"] for a in amostras_classe]))
+            for mat_nome in materiais_presentes:
+                simbolo = SIMBOLOS_MATERIAIS.get(mat_nome, "o")
                 indices_mat = [i for i, a in enumerate(amostras_classe) if a["material"] == mat_nome]
                 if not indices_mat:
                     continue
@@ -2427,7 +2809,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 amostra["pos_x_tau_plot"] = x_jitter_tau[idx_a]
                 
             # Plota cada material desta classe com seu símbolo correspondente
-            for mat_nome, simbolo in SIMBOLOS_MATERIAIS.items():
+            materiais_presentes = list(set([a["material"] for a in amostras_classe]))
+            for mat_nome in materiais_presentes:
+                simbolo = SIMBOLOS_MATERIAIS.get(mat_nome, "o")
                 indices_mat = [i for i, a in enumerate(amostras_classe) if a["material"] == mat_nome]
                 if not indices_mat:
                     continue
@@ -2453,7 +2837,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             rgb = CORES_RGB.get(c, (127, 140, 141))
             
             # Plota cada material desta classe com seu símbolo correspondente
-            for mat_nome, simbolo in SIMBOLOS_MATERIAIS.items():
+            materiais_presentes = list(set([a["material"] for a in amostras_classe]))
+            for mat_nome in materiais_presentes:
+                simbolo = SIMBOLOS_MATERIAIS.get(mat_nome, "o")
                 amostras_mat = [a for a in amostras_classe if a["material"] == mat_nome]
                 if not amostras_mat:
                     continue
