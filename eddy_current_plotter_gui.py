@@ -207,7 +207,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.serial_thread.erro_serial.connect(self.tratar_erro_serial)
         
         # Parâmetros físicos
-        self.dt_us = 0.1  # Padrão calibrado: 10 MSPS (ADC a 96/80 MHz, 16-bit, oversampling desativado)
+        self.dt_us = 0.354  # Padrão calibrado: 10 MSPS (ADC a 96/80 MHz, 16-bit, oversampling desativado)
         self.arquivo_csv = "dataset_cupons_indutancia.csv"
         
         # Gerenciamento de materiais customizados
@@ -394,7 +394,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.spin_dt = QtWidgets.QDoubleSpinBox()
         self.spin_dt.setDecimals(5)
         self.spin_dt.setRange(0.00001, 10000.0)
-        self.spin_dt.setSingleStep(0.354)
+        self.spin_dt.setSingleStep(0.1)
         self.spin_dt.setValue(self.dt_us)
         self.spin_dt.valueChanged.connect(self.atualizar_dt_us)
         self.spin_dt.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
@@ -1460,9 +1460,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             dados_por_classe[c]["tau"].append(a["tau"])
             dados_por_classe[c]["curvas"].append(a["curva"])
 
-        # 1. Curvas médias de referência
+        # Determina a unidade de tempo do diagnóstico baseada no dt_us das amostras
+        primeira_amostra = amostras_limpas[0] if amostras_limpas else None
+        diag_dt = primeira_amostra["dt_us"] if (primeira_amostra and "dt_us" in primeira_amostra) else self.dt_us
+        fator_diag, unid_diag = self.obter_unidade_tempo(diag_dt)
+
+        # 1. Curvas médias de referência com escala dinâmica
         max_len = 150
-        t = np.arange(max_len) * self.dt_us
+        t = np.arange(max_len) * diag_dt * fator_diag
+        self.plot_diag_curves.setLabel('bottom', 'Tempo', unid_diag)
         
         if hasattr(self.plot_diag_curves, 'legend') and self.plot_diag_curves.legend is not None:
             self.plot_diag_curves.legend.clear()
@@ -1506,7 +1512,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 if not indices_mat:
                     continue
                 
-                tau_sub = [tau_list[i] for i in indices_mat]
+                tau_sub = [tau_list[i] * fator_diag for i in indices_mat]
                 auc_sub = [auc_list[i] for i in indices_mat]
                 
                 self.plot_diag_scatter.plot(
@@ -1542,9 +1548,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.plot_diag_auc.plot([x, x], [m_a - s_a, m_a + s_a], pen=pg.mkPen(color, width=2))
             self.plot_diag_auc.plot([x - 0.15, x + 0.15], [m_a, m_a], pen=pg.mkPen('w', width=2))
             
-            m_t, s_t = np.mean(dados_tau), np.std(dados_tau)
+            m_t, s_t = np.mean(dados_tau) * fator_diag, np.std(dados_tau) * fator_diag
             self.plot_diag_tau.plot([x, x], [m_t - s_t, m_t + s_t], pen=pg.mkPen(color, width=2))
             self.plot_diag_tau.plot([x - 0.15, x + 0.15], [m_t, m_t], pen=pg.mkPen('w', width=2))
+            
+        # Atualiza os eixos dos plots na Aba 4 com a unidade dinâmica correspondente
+        self.plot_diag_tau.setLabel('left', 'Tau', unid_diag)
+        self.plot_diag_scatter.setLabel('bottom', 'Tau', unid_diag)
 
     # =====================================================================
     # LÓGICA DE GERENCIAMENTO DE CONEXÃO
@@ -1637,7 +1647,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             print("[INFO] Modo ETS (Tempo Equivalente) ativado. dt = 0.01667 us (~60 MSPS)")
         else:
             self.serial_thread.set_modo_ets(False)
-            self.spin_dt.setValue(0.1)
+            self.spin_dt.setValue(0.354)
             self.plot_decay.setLabel('bottom', 'Tempo (Modo DMA)', 'us')
             print("[INFO] Modo DMA (Padrão) ativado. dt = 0.1 us (~10.0 MSPS)")
 
@@ -1863,6 +1873,27 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     # =====================================================================
     # PROCESSAMENTO MATEMÁTICO DOS DADOS
     # =====================================================================
+    def obter_unidade_tempo(self, dt=None):
+        # Determina o multiplicador e o sufixo de unidade com base no dt
+        dt_val = dt if dt is not None else self.dt_us
+        if dt_val < 0.001:  # Menor que 1 ns por amostra (0.001 us)
+            return 1000000.0, "ps"
+        elif dt_val < 1.0:  # Menor que 1 us por amostra (1.0 us)
+            return 1000.0, "ns"
+        else:
+            return 1.0, "\u03bcs"
+
+    def formatar_valor_tempo(self, valor_us):
+        if valor_us is None:
+            return "--- \u03bcs"
+        abs_val = abs(valor_us)
+        if abs_val == 0:
+            return "0.00 \u03bcs"
+        
+        fator, unidade = self.obter_unidade_tempo(abs_val)
+        casas = 1 if unidade == "ps" else 2
+        return f"{valor_us * fator:.{casas}f} {unidade}"
+
     def processar_nova_curva(self, valores):
         self.last_valores = valores
         self.recent_curves.append(valores)
@@ -1961,12 +1992,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.lbl_cls_degrad_val.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {cor_classe};")
 
         # 5. Atualiza os Displays de Texto e Valores na tela (Instantâneos)
-        self.lbl_tau_val.setText(f"{tau:.2f} \u03bcs")
+        self.lbl_tau_val.setText(self.formatar_valor_tempo(tau))
         self.lbl_auc_val.setText(f"{auc:.1f}")
 
         # Se não estiver no modo contínuo, zera a exibição da média móvel
         if not self.chk_auto_trigger.isChecked():
-            self.lbl_tau_ma_val.setText("--- \u03bcs")
+            self.lbl_tau_ma_val.setText(self.formatar_valor_tempo(None))
             self.lbl_auc_ma_val.setText("---")
 
         # Lógica de coleta automatizada de 10 medições sequenciais
@@ -2001,17 +2032,23 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.line_peak.setValue(peak_idx)
         self.line_offset.setValue(offset)
 
-        # Plot do decaimento
-        tempo_dec = np.arange(len(decay_adj)) * self.dt_us
+        # Plot do decaimento com escala dinâmica de tempo
+        fator_t, unid_t = self.obter_unidade_tempo()
+        tempo_dec = np.arange(len(decay_adj)) * self.dt_us * fator_t
         self.curve_decay.setData(tempo_dec, decay_adj)
-        self.plot_decay.setXRange(0, max(10, tempo_dec[-1]))
+        self.plot_decay.setXRange(0, tempo_dec[-1])
+        
+        # Atualiza a legenda do eixo inferior com a unidade escalada correspondente
+        khz = 1000.0 / self.dt_us if self.dt_us > 0 else 0.0
+        modo_nome = "ETS" if not self.chk_auto_trigger.isChecked() else "DMA"
+        self.plot_decay.setLabel('bottom', f'Tempo (Modo {modo_nome} - {khz:.2f} kHz)', unid_t)
         
         # 6.5. Atualiza os gráficos da Aba 4 (Diagnóstico em Tempo Real) se estiver ativa
         if self.tab_widget.currentIndex() == 3:
             self.lbl_diag_material.setText(f"Material: {material_detectado}")
             self.lbl_diag_classe.setText(f"Classe: {classe_detectada}")
-            self.lbl_diag_confianca.setText(f"Confian\u00e7a: {confianca:.1f}%")
-            self.lbl_diag_tau.setText(f"Tau (\u03bcs): {tau:.3f} \u03bcs")
+            self.lbl_diag_confianca.setText(f"Confiança: {confianca:.1f}%")
+            self.lbl_diag_tau.setText(f"Tau: {self.formatar_valor_tempo(tau)}")
             self.lbl_diag_auc.setText(f"AUC: {auc:.1f}")
             
             # Calcular R² para exibir nas métricas físicas
@@ -2046,16 +2083,17 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 self.diag_active_curve.setData(tempo_dec, decay_adj)
                 
             # Atualiza Ponto Ativo no Scatter Plot (Estrela Amarela Grande com borda branca)
+            tau_escalado = tau * fator_t
             if self.diag_active_scatter is None:
                 self.diag_active_scatter = self.plot_diag_scatter.plot(
-                    [tau], [auc], pen=None, symbol="star", symbolSize=16,
+                    [tau_escalado], [auc], pen=None, symbol="star", symbolSize=16,
                     symbolBrush=pg.mkBrush("#f1c40f"), symbolPen=pg.mkPen("w", width=1.5)
                 )
             else:
-                self.diag_active_scatter.setData([tau], [auc])
+                self.diag_active_scatter.setData([tau_escalado], [auc])
                 
             # Atualiza linhas indicadoras nas distribuições
-            CLASSES_ORDEM = ["Saud\u00e1vel", "Leve", "Moderada", "Avan\u00e7ada", "Corro\u00eddo", "Ar Livre"]
+            CLASSES_ORDEM = ["Saudável", "Leve", "Moderada", "Avançada", "Corroído", "Ar Livre"]
             pos_x = None
             x_val = 1.0
             for c in CLASSES_ORDEM:
@@ -2076,7 +2114,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 if self.diag_active_tau_line is None:
                     self.diag_active_tau_line = pg.InfiniteLine(angle=0, pen=pg.mkPen("#f1c40f", width=1.5, style=QtCore.Qt.DashLine))
                     self.plot_diag_tau.addItem(self.diag_active_tau_line)
-                self.diag_active_tau_line.setValue(tau)
+                self.diag_active_tau_line.setValue(tau_escalado)
         
         # 7. Se estiver no modo contínuo, adiciona os dados nas deques de tendência
         if self.chk_auto_trigger.isChecked():
@@ -2099,15 +2137,22 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             ma_tau = calcular_ma(self.trend_tau)
             ma_auc = calcular_ma(self.trend_auc)
             
-            # Atualiza os dados das tendências
-            self.curve_trend_tau.setData(list(self.trend_indices), list(self.trend_tau))
+            # Atualiza os dados das tendências escalando o tempo dinamicamente
+            fator_t, unid_t = self.obter_unidade_tempo()
+            trend_tau_escalado = [v * fator_t for v in self.trend_tau]
+            ma_tau_escalado = [v * fator_t for v in ma_tau]
+
+            self.curve_trend_tau.setData(list(self.trend_indices), trend_tau_escalado)
             self.curve_trend_auc.setData(list(self.trend_indices), list(self.trend_auc))
-            self.curve_trend_tau_ma.setData(list(self.trend_indices), ma_tau)
+            self.curve_trend_tau_ma.setData(list(self.trend_indices), ma_tau_escalado)
             self.curve_trend_auc_ma.setData(list(self.trend_indices), ma_auc)
+            
+            # Atualiza o rótulo do eixo Y esquerdo do gráfico de tendências
+            self.plot_trend.setLabel('left', f'Tau ({unid_t})', color='#2ecc71')
             
             # Atualiza a exibição textual das Médias Móveis na tela
             if len(ma_tau) > 0:
-                self.lbl_tau_ma_val.setText(f"{ma_tau[-1]:.2f} \u03bcs")
+                self.lbl_tau_ma_val.setText(self.formatar_valor_tempo(ma_tau[-1]))
             if len(ma_auc) > 0:
                 self.lbl_auc_ma_val.setText(f"{ma_auc[-1]:.1f}")
             
@@ -2682,6 +2727,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         report.append("<hr>")
         report.append("<h3>--- Estatísticas Comparativas ---</h3>")
         
+        # Determina a unidade de tempo da estatística baseada no dt_us das amostras
+        primeira_amostra = self.amostras_filtradas[0] if self.amostras_filtradas else None
+        stat_dt = primeira_amostra["dt_us"] if (primeira_amostra and "dt_us" in primeira_amostra) else self.dt_us
+        fator_stat, unid_stat = self.obter_unidade_tempo(stat_dt)
+
         for mat, cls in chaves_ordenadas:
             auc_list = dados_agrupados[(mat, cls)]["auc"]
             tau_list = dados_agrupados[(mat, cls)]["tau"]
@@ -2689,11 +2739,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if n > 0:
                 mean_auc = np.mean(auc_list)
                 std_auc = np.std(auc_list)
-                mean_tau = np.mean(tau_list)
-                std_tau = np.std(tau_list)
+                mean_tau = np.mean(tau_list) * fator_stat
+                std_tau = np.std(tau_list) * fator_stat
+                casas = 1 if unid_stat == "ps" else 3
                 report.append(f"<b>{mat} ({cls})</b>:")
                 report.append(f"  * AUC média: {mean_auc:.1f} (&plusmn;{std_auc:.1f})")
-                report.append(f"  * Tau médio: {mean_tau:.3f} (&plusmn;{std_tau:.3f}) &mu;s")
+                report.append(f"  * Tau médio: {mean_tau:.{casas}f} (&plusmn;{std_tau:.{casas}f}) {unid_stat}")
                 report.append("")
         
         self.txt_report_stats.setHtml("<br>".join(report))
@@ -2712,7 +2763,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             ajustadas = np.array(ajustadas)
             return np.mean(ajustadas, axis=0), np.std(ajustadas, axis=0)
 
-        t = np.arange(max_len) * self.dt_us
+        t = np.arange(max_len) * stat_dt * fator_stat
+        self.plot_stat_curves.setLabel('bottom', 'Tempo', unid_stat)
 
         # Estilos de linha diferentes por material para diferenciar no gráfico
         ESTILOS_MATERIAIS = {

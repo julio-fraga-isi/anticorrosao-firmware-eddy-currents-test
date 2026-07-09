@@ -85,8 +85,10 @@ void ExecutarEnsaioRL(void) {
   
   // 1. Garante pino em 0V
   HAL_GPIO_WritePin(EXCITACAO_PIN_GPIO_Port, EXCITACAO_PIN_Pin, GPIO_PIN_RESET);
-  HAL_Delay(1);
-  
+  // Atraso de 100 µs (48.000 ciclos de clock a 480 MHz)
+  // Garante descarga total e acelera a varredura em 10 vezes!
+  DelayCycles(48000);
+
   // 2. Invalida o D-Cache do buffer de recepção antes que o ADC DMA grave nele
   SCB_InvalidateDCache_by_Addr((uint32_t*)adc_buffer, ADC_BUFFER_SIZE * 2);
   
@@ -148,8 +150,9 @@ void ExecutarEnsaioRL_ETS(void) {
   for (int step = 0; step < ADC_BUFFER_SIZE; step++) {
     // Garante pino em 0V para descarga da bobina
     HAL_GPIO_WritePin(EXCITACAO_PIN_GPIO_Port, EXCITACAO_PIN_Pin, GPIO_PIN_RESET);
-    // Atraso de 1 ms para descarga completa da bobina (essencial para o sensor de 100 voltas)
-    HAL_Delay(1);
+    // Atraso de 100 µs (48.000 ciclos de clock a 480 MHz)
+    // Garante descarga total e acelera a varredura em 10 vezes!
+    DelayCycles(48000);
     
     // Dispara o pulso de excitação
     HAL_GPIO_WritePin(EXCITACAO_PIN_GPIO_Port, EXCITACAO_PIN_Pin, GPIO_PIN_SET);
@@ -235,6 +238,8 @@ int main(void)
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   DWT->LAR = 0xC5ACCE55; // Desbloqueia os registradores DWT no Cortex-M7
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk; // Habilita o contador de ciclos
+  // Executa a Calibração de Offset do ADC1 (Essencial para máxima estabilidade e precisão)
+  HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
   /* USER CODE END 2 */
 
   /* Initialize leds */

@@ -1,17 +1,18 @@
 #MicroXplorer Configuration settings - do not modify
-ADC1.Channel-0\#ChannelRegularConversion=ADC_CHANNEL_15
+ADC1.Channel-1\#ChannelRegularConversion=ADC_CHANNEL_15
 ADC1.ClockPrescaler=ADC_CLOCK_ASYNC_DIV1
 ADC1.ContinuousConvMode=ENABLE
 ADC1.ConversionDataManagement=ADC_CONVERSIONDATA_DMA_ONESHOT
-ADC1.IPParameters=Rank-0\#ChannelRegularConversion,Channel-0\#ChannelRegularConversion,SamplingTime-0\#ChannelRegularConversion,OffsetNumber-0\#ChannelRegularConversion,OffsetSignedSaturation-0\#ChannelRegularConversion,NbrOfConversionFlag,ContinuousConvMode,master,ConversionDataManagement,Resolution,OversamplingMode,Ratio,ClockPrescaler
+ADC1.EnableRegularConversion=ENABLE
+ADC1.IPParameters=ContinuousConvMode,master,ConversionDataManagement,Resolution,OversamplingMode,Ratio,ClockPrescaler,EnableRegularConversion,Rank-1\#ChannelRegularConversion,Channel-1\#ChannelRegularConversion,SamplingTime-1\#ChannelRegularConversion,OffsetNumber-1\#ChannelRegularConversion,OffsetSignedSaturation-1\#ChannelRegularConversion,NbrOfConversionFlag
 ADC1.NbrOfConversionFlag=1
-ADC1.OffsetNumber-0\#ChannelRegularConversion=ADC_OFFSET_NONE
-ADC1.OffsetSignedSaturation-0\#ChannelRegularConversion=DISABLE
+ADC1.OffsetNumber-1\#ChannelRegularConversion=ADC_OFFSET_NONE
+ADC1.OffsetSignedSaturation-1\#ChannelRegularConversion=DISABLE
 ADC1.OversamplingMode=DISABLE
-ADC1.Rank-0\#ChannelRegularConversion=1
+ADC1.Rank-1\#ChannelRegularConversion=1
 ADC1.Ratio=32
 ADC1.Resolution=ADC_RESOLUTION_16B
-ADC1.SamplingTime-0\#ChannelRegularConversion=ADC_SAMPLETIME_1CYCLE_5
+ADC1.SamplingTime-1\#ChannelRegularConversion=ADC_SAMPLETIME_1CYCLE_5
 ADC1.master=1
 BSP_IP_NAME=NUCLEO-H753ZI
 CAD.formats=
