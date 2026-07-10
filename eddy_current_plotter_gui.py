@@ -47,8 +47,14 @@ def normalizar_nome_classe(classe_str):
 class ExclusaoSeletivaDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Exclusão Seletiva de Dados")
-        self.setMinimumWidth(340)
+        
+        import os
+        nome_arquivo = "Sem Arquivo"
+        if parent and hasattr(parent, 'arquivo_csv'):
+            nome_arquivo = os.path.basename(parent.arquivo_csv)
+            
+        self.setWindowTitle(f"Excluir Dados - {nome_arquivo}")
+        self.setMinimumWidth(360)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1e1e1e;
@@ -77,8 +83,8 @@ class ExclusaoSeletivaDialog(QtWidgets.QDialog):
         
         layout = QtWidgets.QVBoxLayout(self)
         
-        lbl_info = QtWidgets.QLabel("Selecione os critérios para exclusão do CSV:")
-        lbl_info.setStyleSheet("font-weight: bold; color: #f1c40f; margin-bottom: 10px;")
+        lbl_info = QtWidgets.QLabel(f"Critérios de exclusão para o arquivo:\n➔ {nome_arquivo}")
+        lbl_info.setStyleSheet("font-weight: bold; color: #f1c40f; margin-bottom: 10px; font-size: 10pt;")
         layout.addWidget(lbl_info)
         
         # Dropdown de Material
@@ -108,6 +114,88 @@ class ExclusaoSeletivaDialog(QtWidgets.QDialog):
         btn_layout.addWidget(self.btn_cancelar)
         btn_layout.addWidget(self.btn_excluir)
         layout.addLayout(btn_layout)
+
+class CollapsibleGroupBox(QtWidgets.QWidget):
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.layout_principal = QtWidgets.QVBoxLayout(self)
+        self.layout_principal.setContentsMargins(0, 0, 0, 0)
+        self.layout_principal.setSpacing(0)
+        
+        # Barra de Cabeçalho clicável (Widget customizado)
+        self.header_widget = QtWidgets.QWidget()
+        self.header_widget.setStyleSheet("""
+            QWidget {
+                background-color: #2c2c2e;
+                border: 1px solid #3a3a3c;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+            }
+        """)
+        header_layout = QtWidgets.QHBoxLayout(self.header_widget)
+        header_layout.setContentsMargins(12, 8, 12, 8)
+        
+        # Título
+        self.lbl_title = QtWidgets.QLabel(title)
+        self.lbl_title.setStyleSheet("font-weight: bold; font-size: 10pt; color: #e1e1e6; border: none; background: transparent;")
+        header_layout.addWidget(self.lbl_title)
+        
+        # Spacer no meio
+        header_layout.addStretch()
+        
+        # Ícone de seta
+        self.lbl_arrow = QtWidgets.QLabel("▲")
+        self.lbl_arrow.setStyleSheet("font-weight: bold; font-size: 10pt; color: #a0a0b2; border: none; background: transparent;")
+        header_layout.addWidget(self.lbl_arrow)
+        
+        self.layout_principal.addWidget(self.header_widget)
+        
+        # Torna o cabeçalho clicável detectando o mousePressEvent
+        self.header_widget.mousePressEvent = self.toggle_collapse
+        self.expandido = True
+        
+        # Widget container para o conteúdo (inicialmente sem layout para evitar rejeição do Qt)
+        self.content_container = QtWidgets.QGroupBox()
+        self.content_container.setStyleSheet("""
+            QGroupBox {
+                background-color: #1e1e1f;
+                border: 1px solid #3a3a3c;
+                border-top: none;
+                border-bottom-left-radius: 6px;
+                border-bottom-right-radius: 6px;
+                padding: 10px;
+            }
+        """)
+        self.layout_principal.addWidget(self.content_container)
+        
+    def toggle_collapse(self, event):
+        self.expandido = not self.expandido
+        self.content_container.setVisible(self.expandido)
+        self.lbl_arrow.setText("▲" if self.expandido else "▼")
+        # Ajusta os cantos arredondados do cabeçalho se colapsado
+        if self.expandido:
+            self.header_widget.setStyleSheet("""
+                QWidget {
+                    background-color: #2c2c2e;
+                    border: 1px solid #3a3a3c;
+                    border-top-left-radius: 6px;
+                    border-top-right-radius: 6px;
+                }
+            """)
+        else:
+            self.header_widget.setStyleSheet("""
+                QWidget {
+                    background-color: #2c2c2e;
+                    border: 1px solid #3a3a3c;
+                    border-radius: 6px;
+                }
+            """)
+            
+    def setLayout(self, layout):
+        # Configura as margens e espaçamento padrão no layout do usuário
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+        self.content_container.setLayout(layout)
 
 class SerialWorker(QtCore.QThread):
     """Thread em segundo plano para comunicação serial sem travar a interface"""
@@ -207,7 +295,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.serial_thread.erro_serial.connect(self.tratar_erro_serial)
         
         # Parâmetros físicos
-        self.dt_us = 0.354  # Padrão calibrado: 10 MSPS (ADC a 96/80 MHz, 16-bit, oversampling desativado)
+        self.dt_us = 0.00001  # Padrão calibrado: 10 MSPS (ADC a 96/80 MHz, 16-bit, oversampling desativado)
         self.arquivo_csv = "dataset_cupons_indutancia.csv"
         
         # Gerenciamento de materiais customizados
@@ -338,8 +426,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         panel_left_outer_layout.addWidget(scroll_area)
 
         # 1. Grupo Conectividade
-        group_conn = QtWidgets.QGroupBox("Conectividade Serial")
-        group_conn_layout = QtWidgets.QGridLayout(group_conn)
+        group_conn = CollapsibleGroupBox("Conectividade Serial")
+        group_conn_layout = QtWidgets.QGridLayout()
+        group_conn.setLayout(group_conn_layout)
         
         group_conn_layout.addWidget(QtWidgets.QLabel("Porta COM:"), 0, 0)
         self.combo_portas = QtWidgets.QComboBox()
@@ -368,8 +457,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         scroll_content_layout.addWidget(group_conn)
 
         # 2. Grupo de Aquisição de Sinais
-        group_acq = QtWidgets.QGroupBox("Modo de Operação")
-        group_acq_layout = QtWidgets.QVBoxLayout(group_acq)
+        group_acq = CollapsibleGroupBox("Modo de Operação")
+        group_acq_layout = QtWidgets.QVBoxLayout()
+        group_acq.setLayout(group_acq_layout)
 
         self.btn_single_trigger = QtWidgets.QPushButton("Disparar Leitura Única")
         self.btn_single_trigger.clicked.connect(self.solicitar_leitura_manual)
@@ -404,9 +494,71 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         scroll_content_layout.addWidget(group_acq)
 
+        # 2.5. Grupo de Filtros e Processamento de Sinal
+        group_filters = CollapsibleGroupBox("Filtros e Processamento de Sinal")
+        group_filters_layout = QtWidgets.QGridLayout()
+        group_filters.setLayout(group_filters_layout)
+        
+        # Filtro de Curva Bruta
+        self.chk_filtrar_curva = QtWidgets.QCheckBox("Suavizar Transiente (Curva)")
+        self.chk_filtrar_curva.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
+        self.chk_filtrar_curva.setChecked(False)
+        self.chk_filtrar_curva.stateChanged.connect(lambda: self.treinar_classificador())
+        group_filters_layout.addWidget(self.chk_filtrar_curva, 0, 0, 1, 2)
+        
+        group_filters_layout.addWidget(QtWidgets.QLabel("Janela da Curva (pts):"), 1, 0)
+        self.spin_janela_curva = QtWidgets.QSpinBox()
+        self.spin_janela_curva.setRange(1, 25)
+        self.spin_janela_curva.setValue(5)
+        self.spin_janela_curva.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
+        self.spin_janela_curva.valueChanged.connect(lambda: self.treinar_classificador())
+        group_filters_layout.addWidget(self.spin_janela_curva, 1, 1)
+        
+        self.chk_filtrar_IA = QtWidgets.QCheckBox("Treinar IA com Curvas Filtradas")
+        self.chk_filtrar_IA.setStyleSheet("color: #a0a0b2; font-size: 8pt;")
+        self.chk_filtrar_IA.setChecked(True)
+        self.chk_filtrar_IA.stateChanged.connect(lambda: self.treinar_classificador())
+        group_filters_layout.addWidget(self.chk_filtrar_IA, 2, 0, 1, 2)
+        
+        # Separador horizontal
+        line = QtWidgets.QFrame()
+        line.setFrameShape(QtWidgets.QFrame.HLine)
+        line.setFrameShadow(QtWidgets.QFrame.Sunken)
+        line.setStyleSheet("background-color: #3a3a3c; margin: 4px 0px;")
+        group_filters_layout.addWidget(line, 3, 0, 1, 2)
+        
+        # Filtro de Métricas
+        self.chk_filtrar_metricas = QtWidgets.QCheckBox("Estabilizar Gráfico de Tendências")
+        self.chk_filtrar_metricas.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
+        self.chk_filtrar_metricas.setChecked(True)
+        group_filters_layout.addWidget(self.chk_filtrar_metricas, 4, 0, 1, 2)
+        
+        group_filters_layout.addWidget(QtWidgets.QLabel("Histórico do Gráfico (pts):"), 5, 0)
+        self.spin_janela_metricas = QtWidgets.QSpinBox()
+        self.spin_janela_metricas.setRange(2, 1000)
+        self.spin_janela_metricas.setValue(10)
+        self.spin_janela_metricas.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
+        self.spin_janela_metricas.valueChanged.connect(self.atualizar_tamanho_janela_metricas)
+        group_filters_layout.addWidget(self.spin_janela_metricas, 5, 1)
+        
+        self.chk_ia_usa_media_movel = QtWidgets.QCheckBox("Classificar IA com Média Móvel")
+        self.chk_ia_usa_media_movel.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
+        self.chk_ia_usa_media_movel.setChecked(True)
+        group_filters_layout.addWidget(self.chk_ia_usa_media_movel, 6, 0, 1, 2)
+        
+        group_filters_layout.addWidget(QtWidgets.QLabel("Janela da Média da IA:"), 7, 0)
+        self.spin_janela_ia = QtWidgets.QSpinBox()
+        self.spin_janela_ia.setRange(2, 100)
+        self.spin_janela_ia.setValue(10)
+        self.spin_janela_ia.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
+        group_filters_layout.addWidget(self.spin_janela_ia, 7, 1)
+        
+        scroll_content_layout.addWidget(group_filters)
+
         # 3. Grupo de Registro e Rotulagem (Dataset com RadioButtons)
-        group_record = QtWidgets.QGroupBox("Rotulagem e Gravação de Amostras")
-        group_record_layout = QtWidgets.QGridLayout(group_record)
+        group_record = CollapsibleGroupBox("Rotulagem e Gravação de Amostras")
+        group_record_layout = QtWidgets.QGridLayout()
+        group_record.setLayout(group_record_layout)
 
         group_record_layout.addWidget(QtWidgets.QLabel("ID / Nº Cupom:"), 0, 0)
         self.edit_id_amostra = QtWidgets.QLineEdit("0")
@@ -564,8 +716,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         scroll_content_layout.addWidget(group_record)
 
         # 4. Painel de Status das Métricas (Display Grande)
-        group_metrics = QtWidgets.QGroupBox("Métricas em Tempo Real")
-        group_metrics_layout = QtWidgets.QGridLayout(group_metrics)
+        group_metrics = CollapsibleGroupBox("Métricas em Tempo Real")
+        group_metrics_layout = QtWidgets.QGridLayout()
+        group_metrics.setLayout(group_metrics_layout)
 
         lbl_tau_txt = QtWidgets.QLabel("Tau (\u03c4):")
         lbl_tau_txt.setStyleSheet("font-size: 11pt; color: #a0a0b2;")
@@ -599,8 +752,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         scroll_content_layout.addWidget(group_metrics)
 
         # 4.5. Painel de Classificação Inteligente em Tempo Real (IA)
-        group_classif = QtWidgets.QGroupBox("Classificação do Cupom (IA)")
-        group_classif_layout = QtWidgets.QGridLayout(group_classif)
+        group_classif = CollapsibleGroupBox("Classificação do Cupom (IA)")
+        group_classif_layout = QtWidgets.QGridLayout()
+        group_classif.setLayout(group_classif_layout)
         
         lbl_cls_material_txt = QtWidgets.QLabel("Material Detectado:")
         lbl_cls_material_txt.setStyleSheet("font-size: 10pt; color: #a0a0b2;")
@@ -627,8 +781,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         scroll_content_layout.addWidget(group_classif)
 
         # 5. Grupo de Filtros de Visualização do Gráfico de Tendência
-        group_view = QtWidgets.QGroupBox("Filtros do Gráfico de Tendência")
-        group_view_layout = QtWidgets.QVBoxLayout(group_view)
+        group_view = CollapsibleGroupBox("Filtros do Gráfico de Tendência")
+        group_view_layout = QtWidgets.QVBoxLayout()
+        group_view.setLayout(group_view_layout)
         
         self.chk_show_tau = QtWidgets.QCheckBox("Mostrar Tendência de Tau (Verde)")
         self.chk_show_tau.setChecked(True)
@@ -1642,14 +1797,19 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     def alternar_modo_ets(self, state):
         if state == QtCore.Qt.Checked:
             self.serial_thread.set_modo_ets(True)
-            self.spin_dt.setValue(0.01667)
+            self.arquivo_csv = "dataset_cupons_indutancia_ets.csv"
+            self.spin_dt.setValue(0.00001)
             self.plot_decay.setLabel('bottom', 'Tempo (Modo ETS)', 'us')
-            print("[INFO] Modo ETS (Tempo Equivalente) ativado. dt = 0.01667 us (~60 MSPS)")
+            print(f"[INFO] Modo ETS (Tempo Equivalente) ativado. Dataset: {self.arquivo_csv} | dt = 0.00001 us")
         else:
             self.serial_thread.set_modo_ets(False)
-            self.spin_dt.setValue(0.354)
+            self.arquivo_csv = "dataset_cupons_indutancia.csv"
+            self.spin_dt.setValue(0.00001)
             self.plot_decay.setLabel('bottom', 'Tempo (Modo DMA)', 'us')
-            print("[INFO] Modo DMA (Padrão) ativado. dt = 0.1 us (~10.0 MSPS)")
+            print(f"[INFO] Modo DMA (Padrão) ativado. Dataset: {self.arquivo_csv} | dt = 0.00001 us")
+            
+        # Re-treina o classificador e atualiza a IA na hora com base no novo dataset
+        self.treinar_classificador()
 
     def atualizar_dt_us(self, value):
         self.dt_us = value
@@ -1659,6 +1819,25 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         if not self.chk_ets.isChecked():
             khz = 1000.0 / value if value > 0 else 0
             self.plot_decay.setLabel('bottom', f'Tempo (Modo DMA - {khz:.2f} kHz)', 'us')
+
+    def atualizar_tamanho_janela_metricas(self, value):
+        self.trend_tau = deque(list(self.trend_tau), maxlen=value)
+        self.trend_auc = deque(list(self.trend_auc), maxlen=value)
+        self.trend_indices = deque(list(self.trend_indices), maxlen=value)
+        self.recent_curves = deque(list(self.recent_curves), maxlen=value)
+        print(f"[INFO] Janela de estabilização de métricas atualizada para {value} amostras.")
+
+    def suavizar_curva(self, valores, janela):
+        if janela <= 1:
+            return valores
+        valores_arr = np.array(valores, dtype=float)
+        ret = np.copy(valores_arr)
+        meio = janela // 2
+        for i in range(len(valores_arr)):
+            start = max(0, i - meio)
+            end = min(len(valores_arr), i + meio + 1)
+            ret[i] = np.mean(valores_arr[start:end])
+        return ret.tolist()
 
     def atualizar_visibilidade_tendencias(self):
         show_tau = self.chk_show_tau.isChecked()
@@ -1753,6 +1932,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 except ValueError as ve:
                     print(f"[CLASSIFICADOR] Erro ao converter pontos da curva: {ve} | Linha: {row[:5]}")
                     continue
+                
+                # Se os filtros estiverem ativos na UI, aplica a suavização no dataset para simetria matemática
+                if hasattr(self, 'chk_filtrar_curva') and hasattr(self, 'chk_filtrar_IA'):
+                    if self.chk_filtrar_curva.isChecked() and self.chk_filtrar_IA.isChecked():
+                        curva = self.suavizar_curva(curva, self.spin_janela_curva.value())
                 
                 peak_idx = np.argmax(curva)
                 decay = np.array(curva[peak_idx:])
@@ -1895,12 +2079,18 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         return f"{valor_us * fator:.{casas}f} {unidade}"
 
     def processar_nova_curva(self, valores):
-        self.last_valores = valores
-        self.recent_curves.append(valores)
+        # Se a suavização de transiente estiver ativa, aplica média móvel ponto a ponto na curva
+        if self.chk_filtrar_curva.isChecked():
+            valores_processados = self.suavizar_curva(valores, self.spin_janela_curva.value())
+        else:
+            valores_processados = valores
+
+        self.last_valores = valores_processados
+        self.recent_curves.append(valores_processados)
         
         # 1. Localiza o pico da curva para alinhar o transiente
-        peak_idx = np.argmax(valores)
-        decay = np.array(valores[peak_idx:])
+        peak_idx = np.argmax(valores_processados)
+        decay = np.array(valores_processados[peak_idx:])
         
         # 2. Estimar offset (últimos 10% da curva de decaimento)
         n_final = max(5, int(len(decay) * 0.1))
@@ -1911,7 +2101,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         auc = np.sum(decay_adj) * self.dt_us
         
         # Ajusta dinamicamente a escala Y de forma estável com histerese (evita piscadas por ruído)
-        max_val = max(valores) if len(valores) > 0 else 0
+        max_val = max(valores_processados) if len(valores_processados) > 0 else 0
         if max_val > 0:
             # Sinal bruto
             target_limit_bruto = max_val * 1.15 + 5
@@ -1957,10 +2147,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.last_auc = auc
 
         # 4.5. Classificação Inteligente em tempo real
-        # Usa a média móvel das últimas 10 leituras se estiver em modo contínuo para evitar oscilações por ruído
-        if self.chk_auto_trigger.isChecked() and len(self.trend_tau) >= 3:
-            tau_para_classif = np.mean(list(self.trend_tau)[-10:])
-            auc_para_classif = np.mean(list(self.trend_auc)[-10:])
+        # Usa a média móvel configurável se estiver em modo contínuo e habilitado
+        if self.chk_auto_trigger.isChecked() and self.chk_ia_usa_media_movel.isChecked() and len(self.trend_tau) >= 3:
+            janela_val = min(len(self.trend_tau), self.spin_janela_ia.value())
+            tau_para_classif = np.mean(list(self.trend_tau)[-janela_val:])
+            auc_para_classif = np.mean(list(self.trend_auc)[-janela_val:])
         else:
             tau_para_classif = tau
             auc_para_classif = auc
@@ -1972,7 +2163,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         # Lógica de validação da IA (Aba 3)
         if hasattr(self, 'is_running_validation_test') and self.is_running_validation_test:
-            self.processar_leitura_validacao(tau_para_classif, auc_para_classif, material_detectado, classe_detectada, confianca, valores)
+            self.processar_leitura_validacao(tau_para_classif, auc_para_classif, material_detectado, classe_detectada, confianca, valores_processados)
         
         # Define a cor do estado dependendo da classe detectada
         cor_classe = "#2ecc71" # Verde para saudável
@@ -2009,7 +2200,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if self.chk_salvar_media_movel.isChecked() and len(self.recent_curves) > 0:
                 curva_para_salvar = np.mean(list(self.recent_curves), axis=0).round().astype(int).tolist()
             else:
-                curva_para_salvar = valores
+                curva_para_salvar = valores_processados
                 
             sucesso = self.registrar_linha_csv(id_amostra, material, classe, curva_para_salvar, timestamp, silent=True)
             if not sucesso:
@@ -2028,7 +2219,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 self.finalizar_coleta_sequencial(abortado=False)
 
         # 6. Atualiza os gráficos da Aba 1 (tempo real)
-        self.curve_bruto.setData(valores)
+        self.curve_bruto.setData(valores_processados)
         self.line_peak.setValue(peak_idx)
         self.line_offset.setValue(offset)
 
@@ -2372,7 +2563,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             confirmacao = QtWidgets.QMessageBox.question(
                 self,
                 "Confirmar Exclusão",
-                f"Tem certeza de que deseja excluir do arquivo CSV as amostras correspondentes a:\n\n"
+                f"Tem certeza de que deseja excluir do arquivo:\n"
+                f"➔ {os.path.basename(self.arquivo_csv)}\n\n"
+                f"As amostras correspondentes a:\n"
                 f"• Material: {mat_selecionado}\n"
                 f"• Classe: {cls_selecionada}?",
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
