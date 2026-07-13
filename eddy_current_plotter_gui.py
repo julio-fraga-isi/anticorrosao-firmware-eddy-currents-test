@@ -295,7 +295,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.serial_thread.erro_serial.connect(self.tratar_erro_serial)
         
         # Parâmetros físicos
-        self.dt_us = 0.00001  # Padrão calibrado: 10 MSPS (ADC a 96/80 MHz, 16-bit, oversampling desativado)
+        self.dt_us = 0.21875  # Padrão calibrado: 256 pontos em 56 us
         self.arquivo_csv = "dataset_cupons_indutancia.csv"
         
         # Gerenciamento de materiais customizados
@@ -1804,9 +1804,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         else:
             self.serial_thread.set_modo_ets(False)
             self.arquivo_csv = "dataset_cupons_indutancia.csv"
-            self.spin_dt.setValue(0.00001)
+            self.spin_dt.setValue(0.21875)
             self.plot_decay.setLabel('bottom', 'Tempo (Modo DMA)', 'us')
-            print(f"[INFO] Modo DMA (Padrão) ativado. Dataset: {self.arquivo_csv} | dt = 0.00001 us")
+            print(f"[INFO] Modo DMA (Padrão) ativado. Dataset: {self.arquivo_csv} | dt = 0.21875 us")
             
         # Re-treina o classificador e atualiza a IA na hora com base no novo dataset
         self.treinar_classificador()
