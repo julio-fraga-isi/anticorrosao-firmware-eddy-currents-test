@@ -32,7 +32,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define EXCITACAO_PIN_Pin GPIO_PIN_0
+#define EXCITACAO_PIN_GPIO_Port GPIOA
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -44,6 +45,8 @@
 
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
+
+TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart3;
 DMA_HandleTypeDef hdma_usart3_tx;
@@ -61,6 +64,7 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USART3_UART_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 void ExecutarEnsaioRL(void);
 void ExecutarEnsaioRL_ETS(void);
@@ -83,24 +87,30 @@ static inline void DelayCycles(uint32_t cycles) {
 void ExecutarEnsaioRL(void) {
   adc_conversion_complete = 0;
   
-  // 1. Garante pino em 0V
-  HAL_GPIO_WritePin(EXCITACAO_PIN_GPIO_Port, EXCITACAO_PIN_Pin, GPIO_PIN_RESET);
-  // Atraso de 100 µs (48.000 ciclos de clock a 480 MHz)
-  // Garante descarga total e acelera a varredura em 10 vezes!
+  // 1. Atraso de 100 µs (48.000 ciclos de clock a 480 MHz) para descarga total da bobina
+  // O TIM2 inativo em One-Pulse desliga a saída de hardware e mantém em 0V.
   DelayCycles(48000);
 
   // 2. Invalida o D-Cache do buffer de recepção antes que o ADC DMA grave nele
   SCB_InvalidateDCache_by_Addr((uint32_t*)adc_buffer, ADC_BUFFER_SIZE * 2);
   
-  // Desabilita interrupções temporariamente para eliminar jitter de software na latência de disparo
+  // Desabilita interrupções temporariamente para sincronia perfeita e prevenção de preempção no disparo
   uint32_t primask = __get_PRIMASK();
   __disable_irq();
-  
-  // 3. Inicia ADC via DMA
+
+  // 3. Inicia ADC via DMA (ele fica em prontidão aguardando o trigger de hardware do TIM2)
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, ADC_BUFFER_SIZE);
+
+  // Garante que o contador do TIM2 comece em 0 e gera um evento de update por software (UG)
+  // Isso força uma atualização imediata dos registradores e emite um pulso TRGO (TIM_TRGO_UPDATE)
+  // que dispara o ADC no instante exato de início do ensaio.
+  __HAL_TIM_SET_COUNTER(&htim2, 0);
+  htim2.Instance->EGR = TIM_EGR_UG;
+  __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_UPDATE);
   
-  // 4. Dispara pulso de subida imediatamente
-  HAL_GPIO_WritePin(EXCITACAO_PIN_GPIO_Port, EXCITACAO_PIN_Pin, GPIO_PIN_SET);
+  // 4. Inicia o TIM2 em modo PWM (One-Pulse)
+  // Isso gera fisicamente o pulso de 56 µs no pino PA0 em absoluto sincronismo
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   
   // Restaura interrupções
   __set_PRIMASK(primask);
@@ -108,11 +118,15 @@ void ExecutarEnsaioRL(void) {
   // 5. Aguarda a conclusão (com timeout robusto de 100 ms)
   uint32_t start_tick = HAL_GetTick();
   while (!adc_conversion_complete && (HAL_GetTick() - start_tick < 100)) {
-    // Aguarda a conversão do ADC pelo DMA
+    // Aguarda a conversão do ADC pelo DMA (sinalizada pelo callback de interrupção)
   }
   
-  // 6. Retorna o pino a 0V
-  HAL_GPIO_WritePin(EXCITACAO_PIN_GPIO_Port, EXCITACAO_PIN_Pin, GPIO_PIN_RESET);
+  // 6. Finaliza os periféricos por segurança após a aquisição
+  HAL_ADC_Stop_DMA(&hadc1);
+  
+  // Para o contador mas mantém a saída ativa em 0V com baixa impedância (evita pino flutuante e ringing)
+  __HAL_TIM_DISABLE(&htim2);
+  __HAL_TIM_SET_COUNTER(&htim2, 100);
   
   if (!adc_conversion_complete) {
     // Se falhar, zera o buffer por segurança
@@ -146,12 +160,17 @@ void ExecutarEnsaioRL_ETS(void) {
   hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
   HAL_ADC_Init(&hadc1);
   
-  // 3. Loop de amostragem em tempo equivalente (ETS)
+  // 3. Modifica temporariamente o pino PA0 de Alternate Function (TIM2_CH1) para GPIO Output
+  // Registrador MODER do GPIOA: bits 0 e 1 definem o modo do pino PA0.
+  // Limpa os bits (3UL << 0) e escreve (1UL << 0) para configurar como Output (01).
+  GPIOA->MODER = (GPIOA->MODER & ~(3UL << 0)) | (1UL << 0);
+  
+  // 4. Loop de amostragem em tempo equivalente (ETS)
   for (int step = 0; step < ADC_BUFFER_SIZE; step++) {
     // Garante pino em 0V para descarga da bobina
     HAL_GPIO_WritePin(EXCITACAO_PIN_GPIO_Port, EXCITACAO_PIN_Pin, GPIO_PIN_RESET);
     // Atraso de 100 µs (48.000 ciclos de clock a 480 MHz)
-    // Garante descarga total e acelera a varredura em 10 vezes!
+    // Garante descarga total
     DelayCycles(48000);
     
     // Dispara o pulso de excitação
@@ -160,7 +179,6 @@ void ExecutarEnsaioRL_ETS(void) {
     // Atraso incremental estável e preciso usando o Cycle Counter (DWT CYCCNT)
     // No clock de 480 MHz, cada ciclo equivale a ~2.08 ns.
     // Usando passos de 12 ciclos (~25 ns por passo) para atingir 40 MSPS equivalentes
-    // e cobrir uma janela de até ~6.4 us de decaimento com jitter nulo e perfeita linearidade.
     DelayCycles(step * 12);
     
     // Dispara e lê a conversão única
@@ -169,15 +187,18 @@ void ExecutarEnsaioRL_ETS(void) {
     adc_buffer[step] = HAL_ADC_GetValue(&hadc1);
   }
   
-  // 4. Retorna o pino a 0V
+  // 5. Retorna o pino a 0V e restaura PA0 para Alternate Function (TIM2_CH1) para o modo DMA
   HAL_GPIO_WritePin(EXCITACAO_PIN_GPIO_Port, EXCITACAO_PIN_Pin, GPIO_PIN_RESET);
   
-  // 5. Restaura o ADC para o modo contínuo DMA padrão
+  // Configura PA0 de volta como Alternate Function (10 binário = 2UL << 0)
+  GPIOA->MODER = (GPIOA->MODER & ~(3UL << 0)) | (2UL << 0);
+  
+  // 6. Restaura o ADC para o modo contínuo DMA padrão
   hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DMA_ONESHOT;
   HAL_ADC_Init(&hadc1);
   
-  // 6. Transmite os dados em Binário via DMA com cabeçalho de sincronização
+  // 7. Transmite os dados em Binário via DMA com cabeçalho de sincronização
   tx_dma_buffer[0] = 0xAA;
   tx_dma_buffer[1] = 0x55;
   tx_dma_buffer[2] = 0xAA;
@@ -233,6 +254,7 @@ int main(void)
   MX_DMA_Init();
   MX_ADC1_Init();
   MX_USART3_UART_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   // Inicializa o contador de ciclos (DWT CYCCNT) para medição e delays com precisão de clock (2.08 ns)
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
@@ -366,8 +388,8 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.NbrOfConversion = 1;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
-  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T2_TRGO;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
   hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DMA_ONESHOT;
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
   hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
@@ -402,6 +424,69 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 240 - 1 ;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 150;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_OnePulse_Init(&htim2, TIM_OPMODE_SINGLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 56;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
 
 }
 
@@ -479,7 +564,6 @@ static void MX_DMA_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
   /* USER CODE END MX_GPIO_Init_1 */
@@ -490,19 +574,6 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(EXCITACAO_PIN_GPIO_Port, EXCITACAO_PIN_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : EXCITACAO_PIN_Pin */
-  GPIO_InitStruct.Pin = EXCITACAO_PIN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(EXCITACAO_PIN_GPIO_Port, &GPIO_InitStruct);
-
-  /*AnalogSwitch Config */
-  HAL_SYSCFG_AnalogSwitchConfig(SYSCFG_SWITCH_PA0, SYSCFG_SWITCH_PA0_CLOSE);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
