@@ -47,6 +47,7 @@ ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 UART_HandleTypeDef huart3;
 DMA_HandleTypeDef hdma_usart3_tx;
@@ -61,6 +62,7 @@ uint8_t tx_dma_buffer[544] __attribute__((aligned(32))); // 4 bytes cabeçalho +
 volatile uint8_t ensaio_period_ms = 33;
 volatile uint8_t ensaio_ativo = 0;             // 0 = Pausado (Padrão), 1 = Rodando Contínuo
 volatile uint8_t single_trigger_requested = 0; // Flag para disparo de leitura única
+volatile uint16_t ensaio_dt_ns = 218;          // Intervalo de amostragem padrão (218 ns)
 uint8_t uart_rx_byte;
 /* USER CODE END PV */
 
@@ -71,6 +73,7 @@ static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
 /* USER CODE BEGIN PFP */
 void ExecutarEnsaioRL(void);
 void ExecutarEnsaioRL_ETS(void);
@@ -82,6 +85,10 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
   if (hadc->Instance == ADC1) {
     adc_conversion_complete = 1;
     HAL_ADC_Stop_DMA(hadc);
+    
+    // Desabilita o Timer 3 (metrônomo) para parar triggers pós-fim de bloco
+    __HAL_TIM_DISABLE(&htim3);
+    __HAL_TIM_SET_COUNTER(&htim3, 0);
   }
 }
 
@@ -89,6 +96,8 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
   if (huart->Instance == USART3) {
     static uint8_t rx_state = 0;
     static uint8_t rx_period = 0;
+    static uint8_t rx_dt_bytes[2] = {0};
+    static uint8_t rx_dt_idx = 0;
     
     if (rx_state == 0) {
       if (uart_rx_byte == 'f') {
@@ -99,6 +108,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
         ensaio_ativo = 1; // Retoma a aquisição contínua
       } else if (uart_rx_byte == 't') {
         single_trigger_requested = 1; // Solicita disparo único seguro fora da interrupção
+      } else if (uart_rx_byte == 'd') {
+        rx_state = 2; // Recebe o valor de dt (ns) em 2 bytes
+        rx_dt_idx = 0;
       }
     } else if (rx_state == 1) {
       rx_period = uart_rx_byte;
@@ -107,6 +119,23 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
         ensaio_period_ms = rx_period;
       }
       rx_state = 0;
+    } else if (rx_state == 2) {
+      rx_dt_bytes[rx_dt_idx++] = uart_rx_byte;
+      if (rx_dt_idx >= 2) {
+        uint16_t novo_dt = (uint16_t)(rx_dt_bytes[0] | (rx_dt_bytes[1] << 8));
+        // Limites de segurança do dt (entre 100 ns e 10000 ns)
+        if (novo_dt >= 100 && novo_dt <= 10000) {
+          ensaio_dt_ns = novo_dt;
+          // Recalcula o ARR do TIM3 (Timer 3 roda a 240 MHz, ticks = dt_ns * 240 / 1000)
+          uint32_t timer_ticks = ((uint32_t)ensaio_dt_ns * 240) / 1000;
+          if (timer_ticks > 0) {
+            htim3.Instance->ARR = timer_ticks - 1;
+          } else {
+            htim3.Instance->ARR = 0;
+          }
+        }
+        rx_state = 0;
+      }
     } else {
       rx_state = 0;
     }
@@ -135,12 +164,15 @@ void ExecutarEnsaioRL(void) {
   uint32_t primask = __get_PRIMASK();
   __disable_irq();
 
-  // 3. Inicia ADC via DMA (ele fica em prontidão aguardando o trigger de hardware do TIM2)
+  // 3. Inicia ADC via DMA (ele fica em prontidão aguardando o trigger de hardware do TIM3)
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, ADC_BUFFER_SIZE);
+
+  // Garante que o contador do TIM3 comece em 0
+  __HAL_TIM_SET_COUNTER(&htim3, 0);
 
   // Garante que o contador do TIM2 comece em 0 e gera um evento de update por software (UG)
   // Isso força uma atualização imediata dos registradores e emite um pulso TRGO (TIM_TRGO_UPDATE)
-  // que dispara o ADC no instante exato de início do ensaio.
+  // que dispara o TIM3 (Slave) no instante exato de início do ensaio.
   __HAL_TIM_SET_COUNTER(&htim2, 0);
   htim2.Instance->EGR = TIM_EGR_UG;
   __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_UPDATE);
@@ -167,6 +199,10 @@ void ExecutarEnsaioRL(void) {
 
   // 6. Finaliza os periféricos por segurança após a aquisição
   HAL_ADC_Stop_DMA(&hadc1);
+  
+  // Desabilita o Timer 3
+  __HAL_TIM_DISABLE(&htim3);
+  __HAL_TIM_SET_COUNTER(&htim3, 0);
   
   // Para o contador mas mantém a saída ativa em 0V com baixa impedância (evita pino flutuante e ringing)
   __HAL_TIM_DISABLE(&htim2);
@@ -309,6 +345,8 @@ int main(void)
   MX_ADC1_Init();
   MX_USART3_UART_Init();
   MX_TIM2_Init();
+  MX_TIM3_Init();
+  /* USER CODE BEGIN 2 */
   // Inicializa o contador de ciclos (DWT CYCCNT) para medição e delays com precisão de clock (2.08 ns)
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   DWT->LAR = 0xC5ACCE55; // Desbloqueia os registradores DWT no Cortex-M7
@@ -446,10 +484,10 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = ENABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.NbrOfConversion = 1;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T2_TRGO;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T3_TRGO;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
   hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DMA_ONESHOT;
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
@@ -548,6 +586,58 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 2 */
   HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_SlaveConfigTypeDef sSlaveConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 0;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 51;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_TRIGGER;
+  sSlaveConfig.InputTrigger = TIM_TS_ITR1;
+  if (HAL_TIM_SlaveConfigSynchro(&htim3, &sSlaveConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
 
 }
 

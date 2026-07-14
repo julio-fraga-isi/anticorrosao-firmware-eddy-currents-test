@@ -240,6 +240,18 @@ class SerialWorker(QtCore.QThread):
         finally:
             self.mutex.unlock()
 
+    def enviar_config_dt(self, dt_ns):
+        self.mutex.lock()
+        try:
+            if self.ser and self.ser.is_open:
+                # Envia 'd' (0x64) seguido do dt em ns (uint16_t, formato little-endian)
+                self.ser.write(struct.pack('<BH', ord('d'), int(dt_ns)))
+                print(f"[SERIAL] Comando enviado: Intervalo dt físico ajustado para {dt_ns} ns")
+        except Exception as e:
+            print(f"[ERRO SERIAL] Falha ao enviar comando de dt: {e}")
+        finally:
+            self.mutex.unlock()
+
     def conectar(self, porta, baud=921600):
         self.porta = porta
         self.baud = baud
@@ -501,8 +513,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # group_acq_layout.addWidget(self.chk_ets) # Ocultado - Usando apenas o Modo Padrão (DMA) a 10 Hz
 
         # Campo para ajuste manual e visualização do tempo entre amostras (dt_us)
+        layout_dt_container = QtWidgets.QVBoxLayout()
+        
         layout_dt = QtWidgets.QHBoxLayout()
-        lbl_dt = QtWidgets.QLabel("Intervalo dt (μs):")
+        lbl_dt = QtWidgets.QLabel("Intervalo dt Alvo (μs):")
         lbl_dt.setStyleSheet("color: #e1e1e6; font-size: 9pt;")
         layout_dt.addWidget(lbl_dt)
         
@@ -515,7 +529,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.spin_dt.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
         self.spin_dt.setMinimumHeight(28)
         layout_dt.addWidget(self.spin_dt)
-        group_acq_layout.addLayout(layout_dt)
+        layout_dt_container.addLayout(layout_dt)
+        
+        # Label para exibir o dt real calculado pelo microcontrolador
+        self.lbl_dt_medido = QtWidgets.QLabel("dt Real Medido: -- μs (-- kHz)")
+        self.lbl_dt_medido.setStyleSheet("color: #2ecc71; font-size: 8pt; font-style: italic; margin-left: 2px;")
+        layout_dt_container.addWidget(self.lbl_dt_medido)
+        
+        group_acq_layout.addLayout(layout_dt_container)
 
         # Campo para ajuste da Frequência de Disparo Síncrona (Hz) controlada pelo firmware
         layout_freq = QtWidgets.QHBoxLayout()
@@ -1792,6 +1813,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             
             # Envia a configuração de frequência síncrona padrão/atual 100ms após conectar (para dar tempo da serial iniciar)
             QtCore.QTimer.singleShot(100, lambda: self.atualizar_frequencia_disparo(self.spin_freq.value()))
+            # Envia a configuração de dt síncrona inicial 150ms após conectar
+            QtCore.QTimer.singleShot(150, lambda: self.serial_thread.enviar_config_dt(int(self.spin_dt.value() * 1000)))
         else:
             self.chk_auto_trigger.setChecked(False) # Desativa auto-trigger antes de desligar
             self.serial_thread.desconectar()
@@ -1869,6 +1892,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
     def atualizar_dt_us(self, value):
         self.dt_us = value
+        # Envia a nova configuração de dt físico para a placa se conectado e se não estiver em modo ETS
+        if self.serial_thread.running and not self.chk_ets.isChecked():
+            self.serial_thread.enviar_config_dt(int(value * 1000))
+            
         # Re-treina o classificador para recalcular as constantes no novo intervalo dt
         self.treinar_classificador()
         # Atualiza o rótulo do eixo X se não estiver em modo ETS para refletir a taxa real configurada
@@ -2169,18 +2196,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Atualiza dinamicamente o dt_us baseado nos ciclos medidos pelo DWT (se recebido)
         if elapsed_cycles > 0:
             dt = (elapsed_cycles / 480.0) / 256.0
-            # Evita retreinamento e piscadas na GUI se a variação for desprezível (< 1%)
-            if abs(self.dt_us - dt) > 0.01:
-                self.spin_dt.blockSignals(True)
-                self.spin_dt.setValue(dt)
-                self.spin_dt.blockSignals(False)
+            khz = 1000.0 / dt if dt > 0 else 0
+            self.lbl_dt_medido.setText(f"dt Real Medido: {dt:.5f} μs ({khz:.2f} kHz)")
+            
+            # Se não estiver em modo ETS, usa o dt medido para a IA e cálculo temporal do gráfico
+            if not self.chk_ets.isChecked():
                 self.dt_us = dt
-                self.treinar_classificador()
-            else:
-                self.dt_us = dt
-                self.spin_dt.blockSignals(True)
-                self.spin_dt.setValue(dt)
-                self.spin_dt.blockSignals(False)
 
         # Se a suavização de transiente estiver ativa, aplica média móvel ponto a ponto na curva
         if self.chk_filtrar_curva.isChecked():
