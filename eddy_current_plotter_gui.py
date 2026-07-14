@@ -229,6 +229,17 @@ class SerialWorker(QtCore.QThread):
         finally:
             self.mutex.unlock()
 
+    def enviar_comando(self, cmd_byte):
+        self.mutex.lock()
+        try:
+            if self.ser and self.ser.is_open:
+                self.ser.write(cmd_byte)
+                print(f"[SERIAL] Comando enviado: {cmd_byte.decode('utf-8', errors='ignore')}")
+        except Exception as e:
+            print(f"[ERRO SERIAL] Falha ao enviar comando: {e}")
+        finally:
+            self.mutex.unlock()
+
     def conectar(self, porta, baud=921600):
         self.porta = porta
         self.baud = baud
