@@ -59,6 +59,8 @@ uint8_t tx_dma_buffer[544] __attribute__((aligned(32))); // 4 bytes cabeçalho +
 
 // Variáveis para controle da Frequência de Disparo Síncrona via UART (padrão: 33 ms = ~30 Hz)
 volatile uint8_t ensaio_period_ms = 33;
+volatile uint8_t ensaio_ativo = 0;             // 0 = Pausado (Padrão), 1 = Rodando Contínuo
+volatile uint8_t single_trigger_requested = 0; // Flag para disparo de leitura única
 uint8_t uart_rx_byte;
 /* USER CODE END PV */
 
@@ -88,10 +90,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
     static uint8_t rx_state = 0;
     static uint8_t rx_period = 0;
     
-    // Protocolo de configuração de frequência:
-    // Padrão: 'f' seguido do valor do período em milissegundos
-    if (rx_state == 0 && uart_rx_byte == 'f') {
-      rx_state = 1;
+    if (rx_state == 0) {
+      if (uart_rx_byte == 'f') {
+        rx_state = 1;
+      } else if (uart_rx_byte == 'p') {
+        ensaio_ativo = 0; // Pausa a aquisição contínua
+      } else if (uart_rx_byte == 'r') {
+        ensaio_ativo = 1; // Retoma a aquisição contínua
+      } else if (uart_rx_byte == 't') {
+        single_trigger_requested = 1; // Solicita disparo único seguro fora da interrupção
+      }
     } else if (rx_state == 1) {
       rx_period = uart_rx_byte;
       // Garante limites de segurança do período (entre 5 ms e 250 ms)
@@ -328,8 +336,17 @@ int main(void)
   {
     uint32_t current_tick = HAL_GetTick();
     
-    // Dispara a aquisição no Modo Padrão (DMA) conforme o período configurado (padrão: 33 ms = ~30 Hz)
-    if (current_tick - last_trigger_tick >= ensaio_period_ms) {
+    // 1. Executa disparo único solicitado via UART (t) - de forma segura no thread principal
+    if (single_trigger_requested) {
+      single_trigger_requested = 0;
+      
+      BSP_LED_On(LED_RED);
+      ExecutarEnsaioRL();
+      BSP_LED_Off(LED_RED);
+    }
+    
+    // 2. Executa disparo contínuo se ativado (r) no período configurado (f)
+    if (ensaio_ativo && (current_tick - last_trigger_tick >= ensaio_period_ms)) {
       last_trigger_tick = current_tick;
       
       BSP_LED_On(LED_RED);

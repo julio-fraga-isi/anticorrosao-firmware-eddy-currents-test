@@ -1804,6 +1804,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Sem conexão", "Conecte na porta serial antes de disparar!")
             return
         self.capturar_uma_curva = True
+        self.serial_thread.enviar_comando(b't') # Envia comando de trigger único para a placa
 
     def solicitar_leitura_automatica(self):
         # Desativado: o firmware controla a frequência e envia autonomamente
@@ -1817,12 +1818,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 return
             self.btn_single_trigger.setEnabled(False)
             self.leitura_ativa = True
+            self.serial_thread.enviar_comando(b'r') # Envia comando de "Resume" para começar a aquisição contínua
             if hasattr(self, 'btn_diag_trigger'):
                 self.btn_diag_trigger.setText("Pausar Diagnóstico")
                 self.btn_diag_trigger.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
         else:
             self.btn_single_trigger.setEnabled(True)
             self.leitura_ativa = False
+            if self.serial_thread.running:
+                self.serial_thread.enviar_comando(b'p') # Envia comando de "Pause" para parar a aquisição contínua
             if hasattr(self, 'btn_diag_trigger'):
                 self.btn_diag_trigger.setText("Iniciar Diagnóstico")
                 self.btn_diag_trigger.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
@@ -1919,9 +1923,24 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     # ARQUITETURA DE CLASSIFICAÇÃO INTELIGENTE (IA - NEAREST CENTROID NORMALIZADO)
     # =====================================================================
     def treinar_classificador(self):
-        self.centroids = {}
-        if not os.path.exists(self.arquivo_csv):
-            return
+        # 1. Se estiver rodando e em modo de leitura ativa, pausa a placa temporariamente
+        placa_estava_ativa = False
+        if hasattr(self, 'serial_thread') and self.serial_thread.running:
+            if self.leitura_ativa:
+                placa_estava_ativa = True
+                self.serial_thread.enviar_comando(b'p')
+                time.sleep(0.02) # Espera 20ms para a placa receber e pausar
+                # Esvazia buffer serial para descartar pacotes obsoletos
+                if self.serial_thread.ser:
+                    try:
+                        self.serial_thread.ser.reset_input_buffer()
+                    except Exception:
+                        pass
+
+        try:
+            self.centroids = {}
+            if not os.path.exists(self.arquivo_csv):
+                return
         
         conteudo_csv = None
         try:
@@ -2069,6 +2088,16 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             print(f"[CLASSIFICADOR] Treinado com {len(self.centroids)} classes a partir do CSV.")
         except Exception as e:
             print(f"[CLASSIFICADOR] Erro ao treinar: {e}")
+        finally:
+            # 2. Se a placa estava ativa antes, retoma a leitura
+            if placa_estava_ativa and hasattr(self, 'serial_thread') and self.serial_thread.running:
+                # Esvazia buffer antes de retomar para evitar dados corrompidos
+                if self.serial_thread.ser:
+                    try:
+                        self.serial_thread.ser.reset_input_buffer()
+                    except Exception:
+                        pass
+                self.serial_thread.enviar_comando(b'r')
 
     def classificar_leitura(self, tau, auc):
         if not hasattr(self, 'centroids') or not self.centroids:
