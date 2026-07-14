@@ -199,7 +199,7 @@ class CollapsibleGroupBox(QtWidgets.QWidget):
 
 class SerialWorker(QtCore.QThread):
     """Thread em segundo plano para comunicação serial sem travar a interface"""
-    curva_recebida = QtCore.pyqtSignal(list)
+    curva_recebida = QtCore.pyqtSignal(list, int)
     erro_serial = QtCore.pyqtSignal(str)
 
     def __init__(self):
@@ -269,13 +269,14 @@ class SerialWorker(QtCore.QThread):
                         elif sync_state == 2 and b == b'\xaa':
                             sync_state = 3
                         elif sync_state == 3 and b == b'\x55':
-                            # Sincronizado! Lê os 512 bytes de dados (256 uint16)
-                            data = ser.read(512)
-                            if len(data) == 512:
+                            # Sincronizado! Lê os 516 bytes (512 bytes de dados + 4 bytes de ciclos)
+                            data = ser.read(516)
+                            if len(data) == 516:
                                 # '<256H' indica 256 inteiros de 16 bits sem sinal (little-endian)
-                                valores = list(struct.unpack('<256H', data))
-                                self.curva_recebida.emit(valores)
-                            break
+                                valores = list(struct.unpack('<256H', data[:512]))
+                                elapsed_cycles = struct.unpack('<I', data[512:516])[0]
+                                self.curva_recebida.emit(valores, elapsed_cycles)
+                                break
                         else:
                             sync_state = 0
                 except Exception as e:
@@ -2078,7 +2079,23 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         casas = 1 if unidade == "ps" else 2
         return f"{valor_us * fator:.{casas}f} {unidade}"
 
-    def processar_nova_curva(self, valores):
+    def processar_nova_curva(self, valores, elapsed_cycles=0):
+        # Atualiza dinamicamente o dt_us baseado nos ciclos medidos pelo DWT (se recebido)
+        if elapsed_cycles > 0:
+            dt = (elapsed_cycles / 480.0) / 256.0
+            # Evita retreinamento e piscadas na GUI se a variação for desprezível (< 1%)
+            if abs(self.dt_us - dt) > 0.01:
+                self.spin_dt.blockSignals(True)
+                self.spin_dt.setValue(dt)
+                self.spin_dt.blockSignals(False)
+                self.dt_us = dt
+                self.treinar_classificador()
+            else:
+                self.dt_us = dt
+                self.spin_dt.blockSignals(True)
+                self.spin_dt.setValue(dt)
+                self.spin_dt.blockSignals(False)
+
         # Se a suavização de transiente estiver ativa, aplica média móvel ponto a ponto na curva
         if self.chk_filtrar_curva.isChecked():
             valores_processados = self.suavizar_curva(valores, self.spin_janela_curva.value())

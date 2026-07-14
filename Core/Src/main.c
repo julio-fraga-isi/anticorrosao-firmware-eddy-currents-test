@@ -108,6 +108,9 @@ void ExecutarEnsaioRL(void) {
   htim2.Instance->EGR = TIM_EGR_UG;
   __HAL_TIM_CLEAR_FLAG(&htim2, TIM_FLAG_UPDATE);
   
+  // Captura o ciclo de início exato antes do disparo de hardware
+  uint32_t start_cycles = DWT->CYCCNT;
+
   // 4. Inicia o TIM2 em modo PWM (One-Pulse)
   // Isso gera fisicamente o pulso de 56 µs no pino PA0 em absoluto sincronismo
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
@@ -121,6 +124,10 @@ void ExecutarEnsaioRL(void) {
     // Aguarda a conversão do ADC pelo DMA (sinalizada pelo callback de interrupção)
   }
   
+  // Captura o ciclo de término exato do ensaio
+  uint32_t end_cycles = DWT->CYCCNT;
+  uint32_t elapsed_cycles = end_cycles - start_cycles;
+
   // 6. Finaliza os periféricos por segurança após a aquisição
   HAL_ADC_Stop_DMA(&hadc1);
   
@@ -131,6 +138,7 @@ void ExecutarEnsaioRL(void) {
   if (!adc_conversion_complete) {
     // Se falhar, zera o buffer por segurança
     memset(adc_buffer, 0, sizeof(adc_buffer));
+    elapsed_cycles = 0;
   } else {
     // Invalida o D-Cache novamente após a gravação pelo DMA para a CPU ler os valores novos
     SCB_InvalidateDCache_by_Addr((uint32_t*)adc_buffer, ADC_BUFFER_SIZE * 2);
@@ -142,13 +150,16 @@ void ExecutarEnsaioRL(void) {
   tx_dma_buffer[2] = 0xAA;
   tx_dma_buffer[3] = 0x55;
   memcpy(&tx_dma_buffer[4], adc_buffer, ADC_BUFFER_SIZE * 2);
+  
+  // Insere a duração exata medida pelo DWT (4 bytes) logo após os dados do ADC (512 bytes)
+  memcpy(&tx_dma_buffer[4 + (ADC_BUFFER_SIZE * 2)], &elapsed_cycles, 4);
 
   // Limpa o D-Cache do buffer de transmissão (544 bytes para cobrir toda a linha de cache de 32 bytes)
   SCB_CleanDCache_by_Addr((uint32_t*)tx_dma_buffer, 544);
 
   // Aguarda qualquer transmissão anterior via DMA terminar
   while (huart3.gState != HAL_UART_STATE_READY);
-  HAL_UART_Transmit_DMA(&huart3, tx_dma_buffer, (ADC_BUFFER_SIZE * 2) + 4);
+  HAL_UART_Transmit_DMA(&huart3, tx_dma_buffer, (ADC_BUFFER_SIZE * 2) + 8);
 }
 
 void ExecutarEnsaioRL_ETS(void) {
@@ -205,12 +216,18 @@ void ExecutarEnsaioRL_ETS(void) {
   tx_dma_buffer[3] = 0x55;
   memcpy(&tx_dma_buffer[4], adc_buffer, ADC_BUFFER_SIZE * 2);
 
+  // No modo ETS, cada passo incrementa 12 ciclos do clock de 480 MHz (~25 ns por passo).
+  // Enviamos o valor constante de 3072 ciclos (12 * 256) para que o cálculo do dt
+  // na GUI resulte em exatamente 0.025 µs (40 MSPS equivalentes).
+  uint32_t ets_cycles = 12 * ADC_BUFFER_SIZE;
+  memcpy(&tx_dma_buffer[4 + (ADC_BUFFER_SIZE * 2)], &ets_cycles, 4);
+
   // Limpa o D-Cache do buffer de transmissão
   SCB_CleanDCache_by_Addr((uint32_t*)tx_dma_buffer, 544);
 
   // Aguarda qualquer transmissão anterior via DMA terminar
   while (huart3.gState != HAL_UART_STATE_READY);
-  HAL_UART_Transmit_DMA(&huart3, tx_dma_buffer, (ADC_BUFFER_SIZE * 2) + 4);
+  HAL_UART_Transmit_DMA(&huart3, tx_dma_buffer, (ADC_BUFFER_SIZE * 2) + 8);
 }
 /* USER CODE END 0 */
 
@@ -282,9 +299,9 @@ int main(void)
     if (HAL_UART_Receive(&huart3, &rx_byte, 1, 100) == HAL_OK) {
       if (rx_byte == 't') {
         // Modo Padrão (DMA): Acende LED azul
-        BSP_LED_On(LED_BLUE);
+        BSP_LED_On(LED_RED);
         ExecutarEnsaioRL();
-        BSP_LED_Off(LED_BLUE);
+        BSP_LED_Off(LED_RED);
       } else if (rx_byte == 'e') {
         // Modo ETS (Tempo Equivalente): Acende LED verde
         BSP_LED_On(LED_GREEN);
