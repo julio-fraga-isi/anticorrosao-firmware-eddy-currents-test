@@ -209,12 +209,25 @@ class SerialWorker(QtCore.QThread):
         self.running = False
         self.trigger_requested = False
         self.modo_ets = False
+        self.ser = None
         self.mutex = QtCore.QMutex()
 
     def set_modo_ets(self, enabled):
         self.mutex.lock()
         self.modo_ets = enabled
         self.mutex.unlock()
+
+    def enviar_config_frequencia(self, period_ms):
+        self.mutex.lock()
+        try:
+            if self.ser and self.ser.is_open:
+                # Envia 'f' (0x66) seguido pelo período em ms (1 byte)
+                self.ser.write(struct.pack('<BB', ord('f'), int(period_ms)))
+                print(f"[SERIAL] Comando enviado: Frequência síncrona ajustada para {period_ms} ms (~{1000/period_ms:.1f} Hz)")
+        except Exception as e:
+            print(f"[ERRO SERIAL] Falha ao enviar comando de frequência: {e}")
+        finally:
+            self.mutex.unlock()
 
     def conectar(self, porta, baud=921600):
         self.porta = porta
@@ -233,56 +246,54 @@ class SerialWorker(QtCore.QThread):
 
     def run(self):
         try:
-            ser = serial.Serial(self.porta, self.baud, timeout=1.0)
+            # timeout de 100ms para permitir interrupção rápida de self.running
+            self.ser = serial.Serial(self.porta, self.baud, timeout=0.1)
         except Exception as e:
             self.erro_serial.emit(str(e))
             return
 
-        while self.running:
-            disparar = False
-            self.mutex.lock()
-            if self.trigger_requested:
-                disparar = True
-                self.trigger_requested = False
-            self.mutex.unlock()
+        sync_state = 0
+        try:
+            self.ser.reset_input_buffer()
+        except Exception:
+            pass
 
-            if disparar:
-                try:
-                    self.mutex.lock()
-                    ets_mode = self.modo_ets
-                    self.mutex.unlock()
-                    
-                    ser.reset_input_buffer()
-                    ser.write(b'e' if ets_mode else b't') # Envia 'e' para ETS ou 't' para DMA
-                    
-                    # Busca pelo cabeçalho de sincronização [0xAA, 0x55, 0xAA, 0x55]
+        while self.running:
+            try:
+                # Esvazia a variável trigger_requested se ela for acionada (não usada no disparo contínuo)
+                self.mutex.lock()
+                if self.trigger_requested:
+                    self.trigger_requested = False
+                self.mutex.unlock()
+
+                # Busca pelo cabeçalho de sincronização [0xAA, 0x55, 0xAA, 0x55]
+                b = self.ser.read(1)
+                if not b:
+                    continue
+                
+                if sync_state == 0 and b == b'\xaa':
+                    sync_state = 1
+                elif sync_state == 1 and b == b'\x55':
+                    sync_state = 2
+                elif sync_state == 2 and b == b'\xaa':
+                    sync_state = 3
+                elif sync_state == 3 and b == b'\x55':
+                    # Sincronizado! Lê os 516 bytes (512 bytes de dados + 4 bytes de ciclos)
+                    data = self.ser.read(516)
+                    if len(data) == 516:
+                        valores = list(struct.unpack('<256H', data[:512]))
+                        elapsed_cycles = struct.unpack('<I', data[512:516])[0]
+                        self.curva_recebida.emit(valores, elapsed_cycles)
                     sync_state = 0
-                    start_time = time.time()
-                    while self.running and (time.time() - start_time < 0.5): # timeout de 500ms
-                        b = ser.read(1)
-                        if not b:
-                            break
-                        if sync_state == 0 and b == b'\xaa':
-                            sync_state = 1
-                        elif sync_state == 1 and b == b'\x55':
-                            sync_state = 2
-                        elif sync_state == 2 and b == b'\xaa':
-                            sync_state = 3
-                        elif sync_state == 3 and b == b'\x55':
-                            # Sincronizado! Lê os 516 bytes (512 bytes de dados + 4 bytes de ciclos)
-                            data = ser.read(516)
-                            if len(data) == 516:
-                                # '<256H' indica 256 inteiros de 16 bits sem sinal (little-endian)
-                                valores = list(struct.unpack('<256H', data[:512]))
-                                elapsed_cycles = struct.unpack('<I', data[512:516])[0]
-                                self.curva_recebida.emit(valores, elapsed_cycles)
-                                break
-                        else:
-                            sync_state = 0
-                except Exception as e:
-                    self.erro_serial.emit(str(e))
-            self.msleep(10)
-        ser.close()
+                else:
+                    sync_state = 0
+            except Exception as e:
+                self.erro_serial.emit(str(e))
+                self.msleep(100)
+        
+        if self.ser:
+            self.ser.close()
+            self.ser = None
 
 
 class EddyCurrentPlotter(QtWidgets.QWidget):
@@ -298,6 +309,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Parâmetros físicos
         self.dt_us = 0.21875  # Padrão calibrado: 256 pontos em 56 us
         self.arquivo_csv = "dataset_cupons_indutancia.csv"
+        self.leitura_ativa = False
+        self.capturar_uma_curva = False
         
         # Gerenciamento de materiais customizados
         self.arquivo_materiais_config = "materiais_customizados.txt"
@@ -474,7 +487,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         self.chk_ets = QtWidgets.QCheckBox("Modo ETS (Alta Velocidade / 8 MSPS)")
         self.chk_ets.stateChanged.connect(self.alternar_modo_ets)
-        group_acq_layout.addWidget(self.chk_ets)
+        # group_acq_layout.addWidget(self.chk_ets) # Ocultado - Usando apenas o Modo Padrão (DMA) a 10 Hz
 
         # Campo para ajuste manual e visualização do tempo entre amostras (dt_us)
         layout_dt = QtWidgets.QHBoxLayout()
@@ -492,6 +505,22 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.spin_dt.setMinimumHeight(28)
         layout_dt.addWidget(self.spin_dt)
         group_acq_layout.addLayout(layout_dt)
+
+        # Campo para ajuste da Frequência de Disparo Síncrona (Hz) controlada pelo firmware
+        layout_freq = QtWidgets.QHBoxLayout()
+        lbl_freq = QtWidgets.QLabel("Frequência de Disparo (Hz):")
+        lbl_freq.setStyleSheet("color: #e1e1e6; font-size: 9pt;")
+        layout_freq.addWidget(lbl_freq)
+        
+        self.spin_freq = QtWidgets.QSpinBox()
+        self.spin_freq.setRange(5, 100) # Limites de 5 Hz a 100 Hz
+        self.spin_freq.setValue(30)     # Padrão: 30 Hz
+        self.spin_freq.setSingleStep(5)
+        self.spin_freq.valueChanged.connect(self.atualizar_frequencia_disparo)
+        self.spin_freq.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
+        self.spin_freq.setMinimumHeight(28)
+        layout_freq.addWidget(self.spin_freq)
+        group_acq_layout.addLayout(layout_freq)
 
         scroll_content_layout.addWidget(group_acq)
 
@@ -1749,6 +1778,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.lbl_status_conn.setStyleSheet("color: #2ecc71; font-weight: bold;")
             self.btn_conectar.setText("Desconectar")
             self.btn_conectar.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
+            
+            # Envia a configuração de frequência síncrona padrão/atual 100ms após conectar (para dar tempo da serial iniciar)
+            QtCore.QTimer.singleShot(100, lambda: self.atualizar_frequencia_disparo(self.spin_freq.value()))
         else:
             self.chk_auto_trigger.setChecked(False) # Desativa auto-trigger antes de desligar
             self.serial_thread.desconectar()
@@ -1771,11 +1803,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         if not self.serial_thread.running:
             QtWidgets.QMessageBox.warning(self, "Sem conexão", "Conecte na porta serial antes de disparar!")
             return
-        self.serial_thread.disparar_leitura()
+        self.capturar_uma_curva = True
 
     def solicitar_leitura_automatica(self):
-        if self.serial_thread.running:
-            self.serial_thread.disparar_leitura()
+        # Desativado: o firmware controla a frequência e envia autonomamente
+        pass
 
     def alternar_auto_trigger(self, state):
         if state == QtCore.Qt.Checked:
@@ -1784,13 +1816,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 self.chk_auto_trigger.setChecked(False)
                 return
             self.btn_single_trigger.setEnabled(False)
-            self.auto_trigger_timer.start(30) # Disparos a cada 30 ms (máxima velocidade física permitida pela serial)
+            self.leitura_ativa = True
             if hasattr(self, 'btn_diag_trigger'):
                 self.btn_diag_trigger.setText("Pausar Diagnóstico")
                 self.btn_diag_trigger.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
         else:
-            self.auto_trigger_timer.stop()
             self.btn_single_trigger.setEnabled(True)
+            self.leitura_ativa = False
             if hasattr(self, 'btn_diag_trigger'):
                 self.btn_diag_trigger.setText("Iniciar Diagnóstico")
                 self.btn_diag_trigger.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
@@ -1811,6 +1843,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             
         # Re-treina o classificador e atualiza a IA na hora com base no novo dataset
         self.treinar_classificador()
+
+    def atualizar_frequencia_disparo(self, value):
+        # Converte frequência (Hz) em período (ms)
+        period_ms = int(1000 / value)
+        # Garante limites válidos no lado da GUI
+        period_ms = max(5, min(250, period_ms))
+        if self.serial_thread.running:
+            self.serial_thread.enviar_config_frequencia(period_ms)
 
     def atualizar_dt_us(self, value):
         self.dt_us = value
@@ -2080,6 +2120,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         return f"{valor_us * fator:.{casas}f} {unidade}"
 
     def processar_nova_curva(self, valores, elapsed_cycles=0):
+        if not self.leitura_ativa and not self.capturar_uma_curva:
+            return
+        if self.capturar_uma_curva:
+            self.capturar_uma_curva = False
+
         # Atualiza dinamicamente o dt_us baseado nos ciclos medidos pelo DWT (se recebido)
         if elapsed_cycles > 0:
             dt = (elapsed_cycles / 480.0) / 256.0

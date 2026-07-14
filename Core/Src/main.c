@@ -56,6 +56,10 @@ DMA_HandleTypeDef hdma_usart3_tx;
 uint16_t adc_buffer[ADC_BUFFER_SIZE] __attribute__((aligned(32)));
 volatile uint8_t adc_conversion_complete = 0;
 uint8_t tx_dma_buffer[544] __attribute__((aligned(32))); // 4 bytes cabeçalho + 512 bytes dados, alinhado ao cache do Cortex-M7
+
+// Variáveis para controle da Frequência de Disparo Síncrona via UART (padrão: 33 ms = ~30 Hz)
+volatile uint8_t ensaio_period_ms = 33;
+uint8_t uart_rx_byte;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -76,6 +80,31 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
   if (hadc->Instance == ADC1) {
     adc_conversion_complete = 1;
     HAL_ADC_Stop_DMA(hadc);
+  }
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+  if (huart->Instance == USART3) {
+    static uint8_t rx_state = 0;
+    static uint8_t rx_period = 0;
+    
+    // Protocolo de configuração de frequência:
+    // Padrão: 'f' seguido do valor do período em milissegundos
+    if (rx_state == 0 && uart_rx_byte == 'f') {
+      rx_state = 1;
+    } else if (rx_state == 1) {
+      rx_period = uart_rx_byte;
+      // Garante limites de segurança do período (entre 5 ms e 250 ms)
+      if (rx_period >= 5 && rx_period <= 250) {
+        ensaio_period_ms = rx_period;
+      }
+      rx_state = 0;
+    } else {
+      rx_state = 0;
+    }
+    
+    // Rearma a interrupção para continuar escutando comandos da GUI
+    HAL_UART_Receive_IT(huart, &uart_rx_byte, 1);
   }
 }
 
@@ -272,13 +301,15 @@ int main(void)
   MX_ADC1_Init();
   MX_USART3_UART_Init();
   MX_TIM2_Init();
-  /* USER CODE BEGIN 2 */
   // Inicializa o contador de ciclos (DWT CYCCNT) para medição e delays com precisão de clock (2.08 ns)
   CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   DWT->LAR = 0xC5ACCE55; // Desbloqueia os registradores DWT no Cortex-M7
   DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk; // Habilita o contador de ciclos
   // Executa a Calibração de Offset do ADC1 (Essencial para máxima estabilidade e precisão)
   HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+  
+  // Inicia a recepção de comandos via interrupção (não-bloqueante)
+  HAL_UART_Receive_IT(&huart3, &uart_rx_byte, 1);
   /* USER CODE END 2 */
 
   /* Initialize leds */
@@ -291,23 +322,19 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint32_t last_trigger_tick = 0;
+  
   while (1)
   {
-    uint8_t rx_byte = 0;
+    uint32_t current_tick = HAL_GetTick();
     
-    // Aguarda receber caractere via UART3
-    if (HAL_UART_Receive(&huart3, &rx_byte, 1, 100) == HAL_OK) {
-      if (rx_byte == 't') {
-        // Modo Padrão (DMA): Acende LED azul
-        BSP_LED_On(LED_RED);
-        ExecutarEnsaioRL();
-        BSP_LED_Off(LED_RED);
-      } else if (rx_byte == 'e') {
-        // Modo ETS (Tempo Equivalente): Acende LED verde
-        BSP_LED_On(LED_GREEN);
-        ExecutarEnsaioRL_ETS();
-        BSP_LED_Off(LED_GREEN);
-      }
+    // Dispara a aquisição no Modo Padrão (DMA) conforme o período configurado (padrão: 33 ms = ~30 Hz)
+    if (current_tick - last_trigger_tick >= ensaio_period_ms) {
+      last_trigger_tick = current_tick;
+      
+      BSP_LED_On(LED_RED);
+      ExecutarEnsaioRL();
+      BSP_LED_Off(LED_RED);
     }
     /* USER CODE END WHILE */
 
