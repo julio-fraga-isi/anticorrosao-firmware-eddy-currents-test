@@ -1937,10 +1937,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     except Exception:
                         pass
 
-        try:
-            self.centroids = {}
-            if not os.path.exists(self.arquivo_csv):
-                return
+        self.centroids = {}
+        if not os.path.exists(self.arquivo_csv):
+            if placa_estava_ativa and self.serial_thread.running:
+                self.serial_thread.enviar_comando(b'r')
+            return
         
         conteudo_csv = None
         try:
