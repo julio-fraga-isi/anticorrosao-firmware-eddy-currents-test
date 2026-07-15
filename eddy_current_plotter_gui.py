@@ -743,6 +743,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.chk_salvar_media_movel = QtWidgets.QCheckBox("Gravar Média Móvel (Filtro 10 amostras)")
         self.chk_salvar_media_movel.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
         self.chk_salvar_media_movel.setChecked(True)
+        self.chk_salvar_media_movel.stateChanged.connect(self.ao_alterar_filtro_media_movel)
         group_record_layout.addWidget(self.chk_salvar_media_movel, 3, 0, 1, 2)
 
         self.btn_salvar_registro = QtWidgets.QPushButton("Gravar Medição no CSV")
@@ -1679,8 +1680,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         # Determina a unidade de tempo do diagnóstico baseada no dt_us das amostras
         primeira_amostra = amostras_limpas[0] if amostras_limpas else None
-        diag_dt = primeira_amostra["dt_us"] if (primeira_amostra and "dt_us" in primeira_amostra) else self.dt_us
-        fator_diag, unid_diag = self.obter_unidade_tempo(diag_dt)
+        diag_dt = primeira_amostra["dt_us"] if (primeira_amostra and "dt_us" in primeira_amostra) else 0.21875
+        self.fator_diag, self.unid_diag = self.obter_unidade_tempo(diag_dt)
+        fator_diag = self.fator_diag
+        unid_diag = self.unid_diag
 
         # 1. Curvas médias de referência com escala dinâmica
         max_len = 150
@@ -1891,7 +1894,6 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.serial_thread.enviar_config_frequencia(period_ms)
 
     def atualizar_dt_us(self, value):
-        self.dt_us = value
         # Envia a nova configuração de dt físico para a placa se conectado e se não estiver em modo ETS
         if self.serial_thread.running and not self.chk_ets.isChecked():
             self.serial_thread.enviar_config_dt(int(value * 1000))
@@ -1902,6 +1904,18 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         if not self.chk_ets.isChecked():
             khz = 1000.0 / value if value > 0 else 0
             self.plot_decay.setLabel('bottom', f'Tempo (Modo DMA - {khz:.2f} kHz)', 'us')
+
+    def ao_alterar_filtro_media_movel(self, state):
+        # Limpa cache de estatísticas para forçar releitura do CSV com a nova máscara de filtro
+        self.amostras_estatisticas = []
+        
+        # Re-treina o classificador com o filtro correspondente
+        self.treinar_classificador()
+        
+        # Se estiver na aba de diagnóstico, força recálculo e plotagem
+        if self.tab_widget.currentIndex() == 3:
+            self.rodar_analise_estatistica()
+            self.inicializar_graficos_diagnostico()
 
     def atualizar_tamanho_janela_metricas(self, value):
         self.trend_tau = deque(list(self.trend_tau), maxlen=value)
@@ -1961,6 +1975,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     # ARQUITETURA DE CLASSIFICAÇÃO INTELIGENTE (IA - NEAREST CENTROID NORMALIZADO)
     # =====================================================================
     def treinar_classificador(self):
+        # Limpa o cache de amostras estatísticas para forçar recarga nos gráficos de diagnóstico e estatísticas
+        self.amostras_estatisticas = []
+        
         # 1. Se estiver rodando e em modo de leitura ativa, pausa a placa temporariamente
         placa_estava_ativa = False
         if hasattr(self, 'serial_thread') and self.serial_thread.running:
@@ -2018,12 +2035,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 # Formato antigo tem 260 colunas, formato novo (com dt_us) tem 261 colunas
                 if len(row) >= 261:
                     try:
-                        row_dt = float(row[4].strip()) if row[4].strip() else self.dt_us
+                        row_dt = float(row[4].strip()) if row[4].strip() else 0.21875
                     except ValueError:
-                        row_dt = self.dt_us
+                        row_dt = 0.21875
                     p_start = 5
                 else:
-                    row_dt = self.dt_us
+                    row_dt = 0.21875
                     p_start = 4
                 
                 try:
@@ -2032,10 +2049,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     print(f"[CLASSIFICADOR] Erro ao converter pontos da curva: {ve} | Linha: {row[:5]}")
                     continue
                 
-                # Se os filtros estiverem ativos na UI, aplica a suavização no dataset para simetria matemática
-                if hasattr(self, 'chk_filtrar_curva') and hasattr(self, 'chk_filtrar_IA'):
-                    if self.chk_filtrar_curva.isChecked() and self.chk_filtrar_IA.isChecked():
-                        curva = self.suavizar_curva(curva, self.spin_janela_curva.value())
+                # Filtra dinamicamente os dados do banco para casar com o filtro temporal ativo na UI
+                if len(curva) >= 60:
+                    tail_noise = np.var(np.diff(np.diff(curva[-60:])))
+                    usa_filtro = self.chk_salvar_media_movel.isChecked()
+                    is_filtered = (tail_noise < 100000.0)
+                    if usa_filtro != is_filtered:
+                        continue
                 
                 peak_idx = np.argmax(curva)
                 decay = np.array(curva[peak_idx:])
@@ -2212,9 +2232,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.last_valores = valores_processados
         self.recent_curves.append(valores_processados)
         
-        # 1. Localiza o pico da curva para alinhar o transiente
-        peak_idx = np.argmax(valores_processados)
-        decay = np.array(valores_processados[peak_idx:])
+        # Determina a curva a ser usada para a IA e o cálculo dos gráficos de decaimento (média móvel temporal se ativada)
+        if self.chk_salvar_media_movel.isChecked() and len(self.recent_curves) > 0:
+            valores_ia = np.mean(list(self.recent_curves), axis=0).round().astype(int).tolist()
+        else:
+            valores_ia = valores_processados
+            
+        # 1. Localiza o pico da curva para alinhar o transiente usando a curva da IA para simetria
+        peak_idx = np.argmax(valores_ia)
+        decay = np.array(valores_ia[peak_idx:])
         
         # 2. Estimar offset (últimos 10% da curva de decaimento)
         n_final = max(5, int(len(decay) * 0.1))
@@ -2321,10 +2347,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             material, classe = self.obter_material_e_classe_selecionados()
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            if self.chk_salvar_media_movel.isChecked() and len(self.recent_curves) > 0:
-                curva_para_salvar = np.mean(list(self.recent_curves), axis=0).round().astype(int).tolist()
-            else:
-                curva_para_salvar = valores_processados
+            curva_para_salvar = valores_ia
                 
             sucesso = self.registrar_linha_csv(id_amostra, material, classe, curva_para_salvar, timestamp, silent=True)
             if not sucesso:
@@ -2387,18 +2410,20 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             elif classe_detectada == "Sem Dados": cor_classe = "#7f8c8d"
             self.lbl_diag_classe.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {cor_classe};")
             
-            # Atualiza Curva Ativa Verde Neon
+            # Atualiza Curva Ativa Verde Neon usando a escala de tempo do diagnóstico
+            fator_diag = getattr(self, 'fator_diag', fator_t)
+            tempo_dec_diag = np.arange(len(decay_adj)) * self.dt_us * fator_diag
             if self.diag_active_curve is None:
                 self.diag_active_curve = self.plot_diag_curves.plot(
-                    tempo_dec, decay_adj, 
+                    tempo_dec_diag, decay_adj, 
                     pen=pg.mkPen("#00ff00", width=3.5), 
                     name="Sinal Ativo"
                 )
             else:
-                self.diag_active_curve.setData(tempo_dec, decay_adj)
+                self.diag_active_curve.setData(tempo_dec_diag, decay_adj)
                 
-            # Atualiza Ponto Ativo no Scatter Plot (Estrela Amarela Grande com borda branca)
-            tau_escalado = tau * fator_t
+            # Atualiza Ponto Ativo no Scatter Plot (Estrela Amarela Grande com borda branca) usando fator_diag
+            tau_escalado = tau * fator_diag
             if self.diag_active_scatter is None:
                 self.diag_active_scatter = self.plot_diag_scatter.plot(
                     [tau_escalado], [auc], pen=None, symbol="star", symbolSize=16,
@@ -2882,18 +2907,26 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 # Formato antigo tem 260 colunas, formato novo (com dt_us) tem 261 colunas
                 if len(row) >= 261:
                     try:
-                        row_dt = float(row[4].strip()) if row[4].strip() else self.dt_us
+                        row_dt = float(row[4].strip()) if row[4].strip() else 0.21875
                     except ValueError:
-                        row_dt = self.dt_us
+                        row_dt = 0.21875
                     p_start = 5
                 else:
-                    row_dt = self.dt_us
+                    row_dt = 0.21875
                     p_start = 4
                 
                 try:
                     curva = [int(val) for val in row[p_start:p_start+256]]
                 except ValueError:
                     continue
+                
+                # Filtra dinamicamente os dados do banco para casar com o filtro temporal ativo na UI
+                if len(curva) >= 60:
+                    tail_noise = np.var(np.diff(np.diff(curva[-60:])))
+                    usa_filtro = self.chk_salvar_media_movel.isChecked()
+                    is_filtered = (tail_noise < 100000.0)
+                    if usa_filtro != is_filtered:
+                        continue
                 
                 # Processamento matemático idêntico ao de aquisição em tempo real
                 peak_idx = np.argmax(curva)
@@ -2925,7 +2958,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     "classe": classe,
                     "auc": auc,
                     "tau": tau,
-                    "curva": decay_adj
+                    "curva": decay_adj,
+                    "dt_us": row_dt
                 }
                 self.amostras_estatisticas.append(amostra)
         except Exception as e:
@@ -3046,7 +3080,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         # Determina a unidade de tempo da estatística baseada no dt_us das amostras
         primeira_amostra = self.amostras_filtradas[0] if self.amostras_filtradas else None
-        stat_dt = primeira_amostra["dt_us"] if (primeira_amostra and "dt_us" in primeira_amostra) else self.dt_us
+        stat_dt = primeira_amostra["dt_us"] if (primeira_amostra and "dt_us" in primeira_amostra) else 0.21875
         fator_stat, unid_stat = self.obter_unidade_tempo(stat_dt)
 
         for mat, cls in chaves_ordenadas:
