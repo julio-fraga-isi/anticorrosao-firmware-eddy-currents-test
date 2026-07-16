@@ -199,7 +199,7 @@ class CollapsibleGroupBox(QtWidgets.QWidget):
 
 class SerialWorker(QtCore.QThread):
     """Thread em segundo plano para comunicação serial sem travar a interface"""
-    curva_recebida = QtCore.pyqtSignal(list)
+    curva_recebida = QtCore.pyqtSignal(list, int)
     erro_serial = QtCore.pyqtSignal(str)
 
     def __init__(self):
@@ -209,12 +209,48 @@ class SerialWorker(QtCore.QThread):
         self.running = False
         self.trigger_requested = False
         self.modo_ets = False
+        self.ser = None
         self.mutex = QtCore.QMutex()
 
     def set_modo_ets(self, enabled):
         self.mutex.lock()
         self.modo_ets = enabled
         self.mutex.unlock()
+
+    def enviar_config_frequencia(self, period_ms):
+        self.mutex.lock()
+        try:
+            if self.ser and self.ser.is_open:
+                # Envia 'f' (0x66) seguido pelo período em ms (1 byte)
+                self.ser.write(struct.pack('<BB', ord('f'), int(period_ms)))
+                print(f"[SERIAL] Comando enviado: Frequência síncrona ajustada para {period_ms} ms (~{1000/period_ms:.1f} Hz)")
+        except Exception as e:
+            print(f"[ERRO SERIAL] Falha ao enviar comando de frequência: {e}")
+        finally:
+            self.mutex.unlock()
+
+    def enviar_comando(self, cmd_byte):
+        self.mutex.lock()
+        try:
+            if self.ser and self.ser.is_open:
+                self.ser.write(cmd_byte)
+                print(f"[SERIAL] Comando enviado: {cmd_byte.decode('utf-8', errors='ignore')}")
+        except Exception as e:
+            print(f"[ERRO SERIAL] Falha ao enviar comando: {e}")
+        finally:
+            self.mutex.unlock()
+
+    def enviar_config_dt(self, dt_ns):
+        self.mutex.lock()
+        try:
+            if self.ser and self.ser.is_open:
+                # Envia 'd' (0x64) seguido do dt em ns (uint16_t, formato little-endian)
+                self.ser.write(struct.pack('<BH', ord('d'), int(dt_ns)))
+                print(f"[SERIAL] Comando enviado: Intervalo dt físico ajustado para {dt_ns} ns")
+        except Exception as e:
+            print(f"[ERRO SERIAL] Falha ao enviar comando de dt: {e}")
+        finally:
+            self.mutex.unlock()
 
     def conectar(self, porta, baud=921600):
         self.porta = porta
@@ -233,55 +269,54 @@ class SerialWorker(QtCore.QThread):
 
     def run(self):
         try:
-            ser = serial.Serial(self.porta, self.baud, timeout=1.0)
+            # timeout de 100ms para permitir interrupção rápida de self.running
+            self.ser = serial.Serial(self.porta, self.baud, timeout=0.1)
         except Exception as e:
             self.erro_serial.emit(str(e))
             return
 
-        while self.running:
-            disparar = False
-            self.mutex.lock()
-            if self.trigger_requested:
-                disparar = True
-                self.trigger_requested = False
-            self.mutex.unlock()
+        sync_state = 0
+        try:
+            self.ser.reset_input_buffer()
+        except Exception:
+            pass
 
-            if disparar:
-                try:
-                    self.mutex.lock()
-                    ets_mode = self.modo_ets
-                    self.mutex.unlock()
-                    
-                    ser.reset_input_buffer()
-                    ser.write(b'e' if ets_mode else b't') # Envia 'e' para ETS ou 't' para DMA
-                    
-                    # Busca pelo cabeçalho de sincronização [0xAA, 0x55, 0xAA, 0x55]
+        while self.running:
+            try:
+                # Esvazia a variável trigger_requested se ela for acionada (não usada no disparo contínuo)
+                self.mutex.lock()
+                if self.trigger_requested:
+                    self.trigger_requested = False
+                self.mutex.unlock()
+
+                # Busca pelo cabeçalho de sincronização [0xAA, 0x55, 0xAA, 0x55]
+                b = self.ser.read(1)
+                if not b:
+                    continue
+                
+                if sync_state == 0 and b == b'\xaa':
+                    sync_state = 1
+                elif sync_state == 1 and b == b'\x55':
+                    sync_state = 2
+                elif sync_state == 2 and b == b'\xaa':
+                    sync_state = 3
+                elif sync_state == 3 and b == b'\x55':
+                    # Sincronizado! Lê os 516 bytes (512 bytes de dados + 4 bytes de ciclos)
+                    data = self.ser.read(516)
+                    if len(data) == 516:
+                        valores = list(struct.unpack('<256H', data[:512]))
+                        elapsed_cycles = struct.unpack('<I', data[512:516])[0]
+                        self.curva_recebida.emit(valores, elapsed_cycles)
                     sync_state = 0
-                    start_time = time.time()
-                    while self.running and (time.time() - start_time < 0.5): # timeout de 500ms
-                        b = ser.read(1)
-                        if not b:
-                            break
-                        if sync_state == 0 and b == b'\xaa':
-                            sync_state = 1
-                        elif sync_state == 1 and b == b'\x55':
-                            sync_state = 2
-                        elif sync_state == 2 and b == b'\xaa':
-                            sync_state = 3
-                        elif sync_state == 3 and b == b'\x55':
-                            # Sincronizado! Lê os 512 bytes de dados (256 uint16)
-                            data = ser.read(512)
-                            if len(data) == 512:
-                                # '<256H' indica 256 inteiros de 16 bits sem sinal (little-endian)
-                                valores = list(struct.unpack('<256H', data))
-                                self.curva_recebida.emit(valores)
-                            break
-                        else:
-                            sync_state = 0
-                except Exception as e:
-                    self.erro_serial.emit(str(e))
-            self.msleep(10)
-        ser.close()
+                else:
+                    sync_state = 0
+            except Exception as e:
+                self.erro_serial.emit(str(e))
+                self.msleep(100)
+        
+        if self.ser:
+            self.ser.close()
+            self.ser = None
 
 
 class EddyCurrentPlotter(QtWidgets.QWidget):
@@ -295,8 +330,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.serial_thread.erro_serial.connect(self.tratar_erro_serial)
         
         # Parâmetros físicos
-        self.dt_us = 0.00001  # Padrão calibrado: 10 MSPS (ADC a 96/80 MHz, 16-bit, oversampling desativado)
+        self.dt_us = 0.21875  # Padrão calibrado: 256 pontos em 56 us
         self.arquivo_csv = "dataset_cupons_indutancia.csv"
+        self.leitura_ativa = False
+        self.capturar_uma_curva = False
         
         # Gerenciamento de materiais customizados
         self.arquivo_materiais_config = "materiais_customizados.txt"
@@ -473,11 +510,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         self.chk_ets = QtWidgets.QCheckBox("Modo ETS (Alta Velocidade / 8 MSPS)")
         self.chk_ets.stateChanged.connect(self.alternar_modo_ets)
-        group_acq_layout.addWidget(self.chk_ets)
+        # group_acq_layout.addWidget(self.chk_ets) # Ocultado - Usando apenas o Modo Padrão (DMA) a 10 Hz
 
         # Campo para ajuste manual e visualização do tempo entre amostras (dt_us)
+        layout_dt_container = QtWidgets.QVBoxLayout()
+        
         layout_dt = QtWidgets.QHBoxLayout()
-        lbl_dt = QtWidgets.QLabel("Intervalo dt (μs):")
+        lbl_dt = QtWidgets.QLabel("Intervalo dt Alvo (μs):")
         lbl_dt.setStyleSheet("color: #e1e1e6; font-size: 9pt;")
         layout_dt.addWidget(lbl_dt)
         
@@ -490,7 +529,30 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.spin_dt.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
         self.spin_dt.setMinimumHeight(28)
         layout_dt.addWidget(self.spin_dt)
-        group_acq_layout.addLayout(layout_dt)
+        layout_dt_container.addLayout(layout_dt)
+        
+        # Label para exibir o dt real calculado pelo microcontrolador
+        self.lbl_dt_medido = QtWidgets.QLabel("dt Real Medido: -- μs (-- kHz)")
+        self.lbl_dt_medido.setStyleSheet("color: #2ecc71; font-size: 8pt; font-style: italic; margin-left: 2px;")
+        layout_dt_container.addWidget(self.lbl_dt_medido)
+        
+        group_acq_layout.addLayout(layout_dt_container)
+
+        # Campo para ajuste da Frequência de Disparo Síncrona (Hz) controlada pelo firmware
+        layout_freq = QtWidgets.QHBoxLayout()
+        lbl_freq = QtWidgets.QLabel("Frequência de Disparo (Hz):")
+        lbl_freq.setStyleSheet("color: #e1e1e6; font-size: 9pt;")
+        layout_freq.addWidget(lbl_freq)
+        
+        self.spin_freq = QtWidgets.QSpinBox()
+        self.spin_freq.setRange(5, 100) # Limites de 5 Hz a 100 Hz
+        self.spin_freq.setValue(30)     # Padrão: 30 Hz
+        self.spin_freq.setSingleStep(5)
+        self.spin_freq.valueChanged.connect(self.atualizar_frequencia_disparo)
+        self.spin_freq.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
+        self.spin_freq.setMinimumHeight(28)
+        layout_freq.addWidget(self.spin_freq)
+        group_acq_layout.addLayout(layout_freq)
 
         scroll_content_layout.addWidget(group_acq)
 
@@ -681,6 +743,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.chk_salvar_media_movel = QtWidgets.QCheckBox("Gravar Média Móvel (Filtro 10 amostras)")
         self.chk_salvar_media_movel.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
         self.chk_salvar_media_movel.setChecked(True)
+        self.chk_salvar_media_movel.stateChanged.connect(self.ao_alterar_filtro_media_movel)
         group_record_layout.addWidget(self.chk_salvar_media_movel, 3, 0, 1, 2)
 
         self.btn_salvar_registro = QtWidgets.QPushButton("Gravar Medição no CSV")
@@ -1617,8 +1680,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         # Determina a unidade de tempo do diagnóstico baseada no dt_us das amostras
         primeira_amostra = amostras_limpas[0] if amostras_limpas else None
-        diag_dt = primeira_amostra["dt_us"] if (primeira_amostra and "dt_us" in primeira_amostra) else self.dt_us
-        fator_diag, unid_diag = self.obter_unidade_tempo(diag_dt)
+        diag_dt = primeira_amostra["dt_us"] if (primeira_amostra and "dt_us" in primeira_amostra) else 0.21875
+        self.fator_diag, self.unid_diag = self.obter_unidade_tempo(diag_dt)
+        fator_diag = self.fator_diag
+        unid_diag = self.unid_diag
 
         # 1. Curvas médias de referência com escala dinâmica
         max_len = 150
@@ -1748,6 +1813,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.lbl_status_conn.setStyleSheet("color: #2ecc71; font-weight: bold;")
             self.btn_conectar.setText("Desconectar")
             self.btn_conectar.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
+            
+            # Envia a configuração de frequência síncrona padrão/atual 100ms após conectar (para dar tempo da serial iniciar)
+            QtCore.QTimer.singleShot(100, lambda: self.atualizar_frequencia_disparo(self.spin_freq.value()))
+            # Envia a configuração de dt síncrona inicial 150ms após conectar
+            QtCore.QTimer.singleShot(150, lambda: self.serial_thread.enviar_config_dt(int(self.spin_dt.value() * 1000)))
         else:
             self.chk_auto_trigger.setChecked(False) # Desativa auto-trigger antes de desligar
             self.serial_thread.desconectar()
@@ -1770,11 +1840,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         if not self.serial_thread.running:
             QtWidgets.QMessageBox.warning(self, "Sem conexão", "Conecte na porta serial antes de disparar!")
             return
-        self.serial_thread.disparar_leitura()
+        self.capturar_uma_curva = True
+        self.serial_thread.enviar_comando(b't') # Envia comando de trigger único para a placa
 
     def solicitar_leitura_automatica(self):
-        if self.serial_thread.running:
-            self.serial_thread.disparar_leitura()
+        # Desativado: o firmware controla a frequência e envia autonomamente
+        pass
 
     def alternar_auto_trigger(self, state):
         if state == QtCore.Qt.Checked:
@@ -1783,13 +1854,16 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 self.chk_auto_trigger.setChecked(False)
                 return
             self.btn_single_trigger.setEnabled(False)
-            self.auto_trigger_timer.start(30) # Disparos a cada 30 ms (máxima velocidade física permitida pela serial)
+            self.leitura_ativa = True
+            self.serial_thread.enviar_comando(b'r') # Envia comando de "Resume" para começar a aquisição contínua
             if hasattr(self, 'btn_diag_trigger'):
                 self.btn_diag_trigger.setText("Pausar Diagnóstico")
                 self.btn_diag_trigger.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
         else:
-            self.auto_trigger_timer.stop()
             self.btn_single_trigger.setEnabled(True)
+            self.leitura_ativa = False
+            if self.serial_thread.running:
+                self.serial_thread.enviar_comando(b'p') # Envia comando de "Pause" para parar a aquisição contínua
             if hasattr(self, 'btn_diag_trigger'):
                 self.btn_diag_trigger.setText("Iniciar Diagnóstico")
                 self.btn_diag_trigger.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
@@ -1804,21 +1878,44 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         else:
             self.serial_thread.set_modo_ets(False)
             self.arquivo_csv = "dataset_cupons_indutancia.csv"
-            self.spin_dt.setValue(0.00001)
+            self.spin_dt.setValue(0.21875)
             self.plot_decay.setLabel('bottom', 'Tempo (Modo DMA)', 'us')
-            print(f"[INFO] Modo DMA (Padrão) ativado. Dataset: {self.arquivo_csv} | dt = 0.00001 us")
+            print(f"[INFO] Modo DMA (Padrão) ativado. Dataset: {self.arquivo_csv} | dt = 0.21875 us")
             
         # Re-treina o classificador e atualiza a IA na hora com base no novo dataset
         self.treinar_classificador()
 
+    def atualizar_frequencia_disparo(self, value):
+        # Converte frequência (Hz) em período (ms)
+        period_ms = int(1000 / value)
+        # Garante limites válidos no lado da GUI
+        period_ms = max(5, min(250, period_ms))
+        if self.serial_thread.running:
+            self.serial_thread.enviar_config_frequencia(period_ms)
+
     def atualizar_dt_us(self, value):
-        self.dt_us = value
+        # Envia a nova configuração de dt físico para a placa se conectado e se não estiver em modo ETS
+        if self.serial_thread.running and not self.chk_ets.isChecked():
+            self.serial_thread.enviar_config_dt(int(value * 1000))
+            
         # Re-treina o classificador para recalcular as constantes no novo intervalo dt
         self.treinar_classificador()
         # Atualiza o rótulo do eixo X se não estiver em modo ETS para refletir a taxa real configurada
         if not self.chk_ets.isChecked():
             khz = 1000.0 / value if value > 0 else 0
             self.plot_decay.setLabel('bottom', f'Tempo (Modo DMA - {khz:.2f} kHz)', 'us')
+
+    def ao_alterar_filtro_media_movel(self, state):
+        # Limpa cache de estatísticas para forçar releitura do CSV com a nova máscara de filtro
+        self.amostras_estatisticas = []
+        
+        # Re-treina o classificador com o filtro correspondente
+        self.treinar_classificador()
+        
+        # Se estiver na aba de diagnóstico, força recálculo e plotagem
+        if self.tab_widget.currentIndex() == 3:
+            self.rodar_analise_estatistica()
+            self.inicializar_graficos_diagnostico()
 
     def atualizar_tamanho_janela_metricas(self, value):
         self.trend_tau = deque(list(self.trend_tau), maxlen=value)
@@ -1878,8 +1975,27 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     # ARQUITETURA DE CLASSIFICAÇÃO INTELIGENTE (IA - NEAREST CENTROID NORMALIZADO)
     # =====================================================================
     def treinar_classificador(self):
+        # Limpa o cache de amostras estatísticas para forçar recarga nos gráficos de diagnóstico e estatísticas
+        self.amostras_estatisticas = []
+        
+        # 1. Se estiver rodando e em modo de leitura ativa, pausa a placa temporariamente
+        placa_estava_ativa = False
+        if hasattr(self, 'serial_thread') and self.serial_thread.running:
+            if self.leitura_ativa:
+                placa_estava_ativa = True
+                self.serial_thread.enviar_comando(b'p')
+                time.sleep(0.02) # Espera 20ms para a placa receber e pausar
+                # Esvazia buffer serial para descartar pacotes obsoletos
+                if self.serial_thread.ser:
+                    try:
+                        self.serial_thread.ser.reset_input_buffer()
+                    except Exception:
+                        pass
+
         self.centroids = {}
         if not os.path.exists(self.arquivo_csv):
+            if placa_estava_ativa and self.serial_thread.running:
+                self.serial_thread.enviar_comando(b'r')
             return
         
         conteudo_csv = None
@@ -1919,12 +2035,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 # Formato antigo tem 260 colunas, formato novo (com dt_us) tem 261 colunas
                 if len(row) >= 261:
                     try:
-                        row_dt = float(row[4].strip()) if row[4].strip() else self.dt_us
+                        row_dt = float(row[4].strip()) if row[4].strip() else 0.21875
                     except ValueError:
-                        row_dt = self.dt_us
+                        row_dt = 0.21875
                     p_start = 5
                 else:
-                    row_dt = self.dt_us
+                    row_dt = 0.21875
                     p_start = 4
                 
                 try:
@@ -1933,10 +2049,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     print(f"[CLASSIFICADOR] Erro ao converter pontos da curva: {ve} | Linha: {row[:5]}")
                     continue
                 
-                # Se os filtros estiverem ativos na UI, aplica a suavização no dataset para simetria matemática
-                if hasattr(self, 'chk_filtrar_curva') and hasattr(self, 'chk_filtrar_IA'):
-                    if self.chk_filtrar_curva.isChecked() and self.chk_filtrar_IA.isChecked():
-                        curva = self.suavizar_curva(curva, self.spin_janela_curva.value())
+                # Filtra dinamicamente os dados do banco para casar com o filtro temporal ativo na UI
+                if len(curva) >= 60:
+                    tail_noise = np.var(np.diff(np.diff(curva[-60:])))
+                    usa_filtro = self.chk_salvar_media_movel.isChecked()
+                    is_filtered = (tail_noise < 100000.0)
+                    if usa_filtro != is_filtered:
+                        continue
                 
                 peak_idx = np.argmax(curva)
                 decay = np.array(curva[peak_idx:])
@@ -2028,6 +2147,16 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             print(f"[CLASSIFICADOR] Treinado com {len(self.centroids)} classes a partir do CSV.")
         except Exception as e:
             print(f"[CLASSIFICADOR] Erro ao treinar: {e}")
+        finally:
+            # 2. Se a placa estava ativa antes, retoma a leitura
+            if placa_estava_ativa and hasattr(self, 'serial_thread') and self.serial_thread.running:
+                # Esvazia buffer antes de retomar para evitar dados corrompidos
+                if self.serial_thread.ser:
+                    try:
+                        self.serial_thread.ser.reset_input_buffer()
+                    except Exception:
+                        pass
+                self.serial_thread.enviar_comando(b'r')
 
     def classificar_leitura(self, tau, auc):
         if not hasattr(self, 'centroids') or not self.centroids:
@@ -2078,7 +2207,22 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         casas = 1 if unidade == "ps" else 2
         return f"{valor_us * fator:.{casas}f} {unidade}"
 
-    def processar_nova_curva(self, valores):
+    def processar_nova_curva(self, valores, elapsed_cycles=0):
+        if not self.leitura_ativa and not self.capturar_uma_curva:
+            return
+        if self.capturar_uma_curva:
+            self.capturar_uma_curva = False
+
+        # Atualiza dinamicamente o dt_us baseado nos ciclos medidos pelo DWT (se recebido)
+        if elapsed_cycles > 0:
+            dt = (elapsed_cycles / 480.0) / 256.0
+            khz = 1000.0 / dt if dt > 0 else 0
+            self.lbl_dt_medido.setText(f"dt Real Medido: {dt:.5f} μs ({khz:.2f} kHz)")
+            
+            # Se não estiver em modo ETS, usa o dt medido para a IA e cálculo temporal do gráfico
+            if not self.chk_ets.isChecked():
+                self.dt_us = dt
+
         # Se a suavização de transiente estiver ativa, aplica média móvel ponto a ponto na curva
         if self.chk_filtrar_curva.isChecked():
             valores_processados = self.suavizar_curva(valores, self.spin_janela_curva.value())
@@ -2088,9 +2232,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.last_valores = valores_processados
         self.recent_curves.append(valores_processados)
         
-        # 1. Localiza o pico da curva para alinhar o transiente
-        peak_idx = np.argmax(valores_processados)
-        decay = np.array(valores_processados[peak_idx:])
+        # Determina a curva a ser usada para a IA e o cálculo dos gráficos de decaimento (média móvel temporal se ativada)
+        if self.chk_salvar_media_movel.isChecked() and len(self.recent_curves) > 0:
+            valores_ia = np.mean(list(self.recent_curves), axis=0).round().astype(int).tolist()
+        else:
+            valores_ia = valores_processados
+            
+        # 1. Localiza o pico da curva para alinhar o transiente usando a curva da IA para simetria
+        peak_idx = np.argmax(valores_ia)
+        decay = np.array(valores_ia[peak_idx:])
         
         # 2. Estimar offset (últimos 10% da curva de decaimento)
         n_final = max(5, int(len(decay) * 0.1))
@@ -2197,10 +2347,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             material, classe = self.obter_material_e_classe_selecionados()
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            if self.chk_salvar_media_movel.isChecked() and len(self.recent_curves) > 0:
-                curva_para_salvar = np.mean(list(self.recent_curves), axis=0).round().astype(int).tolist()
-            else:
-                curva_para_salvar = valores_processados
+            curva_para_salvar = valores_ia
                 
             sucesso = self.registrar_linha_csv(id_amostra, material, classe, curva_para_salvar, timestamp, silent=True)
             if not sucesso:
@@ -2263,18 +2410,20 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             elif classe_detectada == "Sem Dados": cor_classe = "#7f8c8d"
             self.lbl_diag_classe.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {cor_classe};")
             
-            # Atualiza Curva Ativa Verde Neon
+            # Atualiza Curva Ativa Verde Neon usando a escala de tempo do diagnóstico
+            fator_diag = getattr(self, 'fator_diag', fator_t)
+            tempo_dec_diag = np.arange(len(decay_adj)) * self.dt_us * fator_diag
             if self.diag_active_curve is None:
                 self.diag_active_curve = self.plot_diag_curves.plot(
-                    tempo_dec, decay_adj, 
+                    tempo_dec_diag, decay_adj, 
                     pen=pg.mkPen("#00ff00", width=3.5), 
                     name="Sinal Ativo"
                 )
             else:
-                self.diag_active_curve.setData(tempo_dec, decay_adj)
+                self.diag_active_curve.setData(tempo_dec_diag, decay_adj)
                 
-            # Atualiza Ponto Ativo no Scatter Plot (Estrela Amarela Grande com borda branca)
-            tau_escalado = tau * fator_t
+            # Atualiza Ponto Ativo no Scatter Plot (Estrela Amarela Grande com borda branca) usando fator_diag
+            tau_escalado = tau * fator_diag
             if self.diag_active_scatter is None:
                 self.diag_active_scatter = self.plot_diag_scatter.plot(
                     [tau_escalado], [auc], pen=None, symbol="star", symbolSize=16,
@@ -2758,18 +2907,26 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 # Formato antigo tem 260 colunas, formato novo (com dt_us) tem 261 colunas
                 if len(row) >= 261:
                     try:
-                        row_dt = float(row[4].strip()) if row[4].strip() else self.dt_us
+                        row_dt = float(row[4].strip()) if row[4].strip() else 0.21875
                     except ValueError:
-                        row_dt = self.dt_us
+                        row_dt = 0.21875
                     p_start = 5
                 else:
-                    row_dt = self.dt_us
+                    row_dt = 0.21875
                     p_start = 4
                 
                 try:
                     curva = [int(val) for val in row[p_start:p_start+256]]
                 except ValueError:
                     continue
+                
+                # Filtra dinamicamente os dados do banco para casar com o filtro temporal ativo na UI
+                if len(curva) >= 60:
+                    tail_noise = np.var(np.diff(np.diff(curva[-60:])))
+                    usa_filtro = self.chk_salvar_media_movel.isChecked()
+                    is_filtered = (tail_noise < 100000.0)
+                    if usa_filtro != is_filtered:
+                        continue
                 
                 # Processamento matemático idêntico ao de aquisição em tempo real
                 peak_idx = np.argmax(curva)
@@ -2801,7 +2958,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     "classe": classe,
                     "auc": auc,
                     "tau": tau,
-                    "curva": decay_adj
+                    "curva": decay_adj,
+                    "dt_us": row_dt
                 }
                 self.amostras_estatisticas.append(amostra)
         except Exception as e:
@@ -2922,7 +3080,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         # Determina a unidade de tempo da estatística baseada no dt_us das amostras
         primeira_amostra = self.amostras_filtradas[0] if self.amostras_filtradas else None
-        stat_dt = primeira_amostra["dt_us"] if (primeira_amostra and "dt_us" in primeira_amostra) else self.dt_us
+        stat_dt = primeira_amostra["dt_us"] if (primeira_amostra and "dt_us" in primeira_amostra) else 0.21875
         fator_stat, unid_stat = self.obter_unidade_tempo(stat_dt)
 
         for mat, cls in chaves_ordenadas:
