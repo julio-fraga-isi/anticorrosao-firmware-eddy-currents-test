@@ -30,11 +30,7 @@ void vSrv_EnsaioInit(void);
  */
 void vSrv_EnsaioRunRL(void);
 
-/**
- * @brief  Executes an Equivalent Time Sampling (ETS) RL acquisition trial and transmits results.
- * @return None
- */
-void vSrv_EnsaioRunETS(void);
+
 
 /**
  * @brief  Checks if continuous trials are active.

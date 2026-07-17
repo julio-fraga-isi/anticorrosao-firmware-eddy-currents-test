@@ -22,6 +22,7 @@ static uint8_t ui8UartRxByte = 0;
 static void vSrv_EnsaioProcessStateZero(uint8_t *pui8RxState, uint8_t *pui8RxDtIdx);
 static void vSrv_EnsaioProcessStateOne(uint8_t *pui8RxState);
 static void vSrv_EnsaioProcessStateTwo(uint8_t *pui8RxState, uint8_t *pui8RxDtBytes, uint8_t *pui8RxDtIdx);
+static uint16_t usSrv_EnsaioCalcularCRC16(const uint8_t *pui8Data, uint32_t ui32Length);
 
 /**
  * @brief  Initializes the trial service variables and starts command reception.
@@ -102,13 +103,17 @@ void vSrv_EnsaioRunRL(void)
     SCB_InvalidateDCache_by_Addr((uint32_t*)ui16AdcBuffer, ADC_BUFFER_SIZE * 2U);
   }
 
-  /* 7. Transmit binary packet: header + data + elapsed cycles */
+  /* 7. Transmit binary packet: header + data + elapsed cycles + CRC16 */
   ui8TxDmaBuffer[0] = HEADER_BYTE_1;
   ui8TxDmaBuffer[1] = HEADER_BYTE_2;
   ui8TxDmaBuffer[2] = HEADER_BYTE_1;
   ui8TxDmaBuffer[3] = HEADER_BYTE_2;
   memcpy(&ui8TxDmaBuffer[4], ui16AdcBuffer, ADC_BUFFER_SIZE * 2U);
   memcpy(&ui8TxDmaBuffer[4 + (ADC_BUFFER_SIZE * 2U)], &ui32ElapsedCycles, 4U);
+
+  /* Calculate CRC-16 on payload (512 bytes data + 4 bytes cycles = 516 bytes) */
+  uint16_t ui16Crc = usSrv_EnsaioCalcularCRC16(&ui8TxDmaBuffer[4], ADC_BUFFER_SIZE * 2U + 4U);
+  memcpy(&ui8TxDmaBuffer[4 + (ADC_BUFFER_SIZE * 2U) + 4U], &ui16Crc, 2U);
 
   /* Clean D-Cache for DMA transmission (aligned to 32 bytes) */
   SCB_CleanDCache_by_Addr((uint32_t*)ui8TxDmaBuffer, TX_DMA_BUFFER_SIZE);
@@ -121,62 +126,7 @@ void vSrv_EnsaioRunRL(void)
   vDrvH_UartTransmitDma(ui8TxDmaBuffer, TX_DMA_TRANSMIT_SIZE);
 }
 
-/**
- * @brief  Executes an Equivalent Time Sampling (ETS) RL acquisition trial and transmits results.
- * @return None
- */
-void vSrv_EnsaioRunETS(void)
-{
-  /* 1. Stop DMA temporarily */
-  vDrvH_AdcStopDma();
-  
-  /* 2. Configure ADC to single conversion mode */
-  vDrvH_AdcSetContinuousMode(false);
-  
-  /* 3. Switch PA0 excitation pin to general-purpose GPIO Output */
-  vDrvH_GpioSetPinModeOutput();
-  
-  /* 4. Equivalent Time Sampling loop */
-  for (int32_t s32Step = 0; s32Step < (int32_t)ADC_BUFFER_SIZE; s32Step++)
-  {
-    vDrvH_GpioSetExcitacaoPin(false);
-    vConfigAppDelayCycles(TIMING_COIL_DISCHARGE_CYCLES);
-    
-    vDrvH_GpioSetExcitacaoPin(true);
-    vConfigAppDelayCycles((uint32_t)s32Step * ETS_STEP_CYCLES);
-    
-    vDrvH_AdcStart();
-    if (pxDrvH_AdcPollForConversion(ADC_POLL_TIMEOUT_MS) == HAL_OK)
-    {
-      ui16AdcBuffer[s32Step] = ui16DrvH_AdcGetValue();
-    }
-  }
-  
-  /* 5. Set pin to low and restore to Alternate Function mode (TIM2 PWM) */
-  vDrvH_GpioSetExcitacaoPin(false);
-  vDrvH_GpioSetPinModeAlternate();
-  
-  /* 6. Restore ADC to DMA continuous mode */
-  vDrvH_AdcSetContinuousMode(true);
-  
-  /* 7. Transmit data packet */
-  ui8TxDmaBuffer[0] = HEADER_BYTE_1;
-  ui8TxDmaBuffer[1] = HEADER_BYTE_2;
-  ui8TxDmaBuffer[2] = HEADER_BYTE_1;
-  ui8TxDmaBuffer[3] = HEADER_BYTE_2;
-  memcpy(&ui8TxDmaBuffer[4], ui16AdcBuffer, ADC_BUFFER_SIZE * 2U);
 
-  uint32_t ui32EtsCycles = ETS_STEP_CYCLES * ADC_BUFFER_SIZE;
-  memcpy(&ui8TxDmaBuffer[4 + (ADC_BUFFER_SIZE * 2U)], &ui32EtsCycles, 4U);
-
-  SCB_CleanDCache_by_Addr((uint32_t*)ui8TxDmaBuffer, TX_DMA_BUFFER_SIZE);
-
-  while (!bDrvH_UartIsReadyToTransmit())
-  {
-    /* Spin wait */
-  }
-  vDrvH_UartTransmitDma(ui8TxDmaBuffer, TX_DMA_TRANSMIT_SIZE);
-}
 
 /**
  * @brief  Checks if continuous trials are active.
@@ -244,6 +194,16 @@ void vSrv_EnsaioUartRxCpltCallback(UART_HandleTypeDef *pxHuart)
     static uint8_t ui8RxState = 0;
     static uint8_t ui8RxDtBytes[2] = {0};
     static uint8_t ui8RxDtIdx = 0;
+    static uint32_t ui32LastByteTick = 0U;
+    uint32_t ui32CurrentTick = HAL_GetTick();
+
+    /* Reset state machine if packet timeout (100ms) occurs between bytes */
+    if (ui8RxState != 0U && (ui32CurrentTick - ui32LastByteTick > 100U))
+    {
+      ui8RxState = 0U;
+      ui8RxDtIdx = 0U;
+    }
+    ui32LastByteTick = ui32CurrentTick;
     
     if (ui8RxState == 0U)
     {
@@ -330,6 +290,27 @@ static void vSrv_EnsaioProcessStateTwo(uint8_t *pui8RxState, uint8_t *pui8RxDtBy
     }
     *pui8RxState = 0U;
   }
+}
+
+static uint16_t usSrv_EnsaioCalcularCRC16(const uint8_t *pui8Data, uint32_t ui32Length)
+{
+  uint16_t ui16Crc = 0xFFFFU;
+  for (uint32_t ui32I = 0U; ui32I < ui32Length; ui32I++)
+  {
+    ui16Crc ^= (uint16_t)pui8Data[ui32I] << 8U;
+    for (uint32_t ui32Bit = 0U; ui32Bit < 8U; ui32Bit++)
+    {
+      if ((ui16Crc & 0x8000U) != 0U)
+      {
+        ui16Crc = (ui16Crc << 1U) ^ 0x1021U;
+      }
+      else
+      {
+        ui16Crc <<= 1U;
+      }
+    }
+  }
+  return ui16Crc;
 }
 
 /* Weak overrides connecting HAL interrupts directly to the Service Layer */

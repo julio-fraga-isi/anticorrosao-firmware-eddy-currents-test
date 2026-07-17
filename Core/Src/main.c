@@ -18,11 +18,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "adc.h"
-#include "dma.h"
-#include "tim.h"
-#include "usart.h"
-#include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -97,12 +92,6 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_DMA_Init();
-  MX_ADC1_Init();
-  MX_USART3_UART_Init();
-  MX_TIM2_Init();
-  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   vApp_AnticorrosaoInit();
   /* USER CODE END 2 */

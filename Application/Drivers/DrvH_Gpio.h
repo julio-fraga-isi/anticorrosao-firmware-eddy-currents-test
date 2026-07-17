@@ -19,24 +19,7 @@ extern "C" {
  */
 void vDrvH_GpioInit(void);
 
-/**
- * @brief  Writes the logic level to the excitation pin.
- * @param[in]  bLevel  Level to write (true = High, false = Low).
- * @return None
- */
-void vDrvH_GpioSetExcitacaoPin(bool bLevel);
 
-/**
- * @brief  Configures the excitation pin (PA0) as general-purpose output (GPIO mode).
- * @return None
- */
-void vDrvH_GpioSetPinModeOutput(void);
-
-/**
- * @brief  Configures the excitation pin (PA0) as Alternate Function (TIM2 PWM mode).
- * @return None
- */
-void vDrvH_GpioSetPinModeAlternate(void);
 
 #ifdef __cplusplus
 }
