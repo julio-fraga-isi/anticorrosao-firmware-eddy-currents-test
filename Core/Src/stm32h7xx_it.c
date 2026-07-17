@@ -22,6 +22,8 @@
 #include "stm32h7xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "DrvH_Adc.h"
+#include "DrvH_Uart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -55,9 +57,7 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
-extern DMA_HandleTypeDef hdma_adc1;
-extern DMA_HandleTypeDef hdma_usart3_tx;
-extern UART_HandleTypeDef huart3;
+
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -201,6 +201,14 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief Inline ISR implementation for DMA1 Stream0 (ADC).
+  */
+static inline void vDMA1_Stream0_ISR(void)
+{
+  HAL_DMA_IRQHandler(pxDrvH_AdcGetDmaHandle());
+}
+
+/**
   * @brief This function handles DMA1 stream0 global interrupt.
   */
 void DMA1_Stream0_IRQHandler(void)
@@ -208,10 +216,18 @@ void DMA1_Stream0_IRQHandler(void)
   /* USER CODE BEGIN DMA1_Stream0_IRQn 0 */
 
   /* USER CODE END DMA1_Stream0_IRQn 0 */
-  HAL_DMA_IRQHandler(&hdma_adc1);
+  vDMA1_Stream0_ISR();
   /* USER CODE BEGIN DMA1_Stream0_IRQn 1 */
 
   /* USER CODE END DMA1_Stream0_IRQn 1 */
+}
+
+/**
+  * @brief Inline ISR implementation for DMA1 Stream1 (UART TX).
+  */
+static inline void vDMA1_Stream1_ISR(void)
+{
+  HAL_DMA_IRQHandler(pxDrvH_UartGetDmaHandle());
 }
 
 /**
@@ -222,10 +238,18 @@ void DMA1_Stream1_IRQHandler(void)
   /* USER CODE BEGIN DMA1_Stream1_IRQn 0 */
 
   /* USER CODE END DMA1_Stream1_IRQn 0 */
-  HAL_DMA_IRQHandler(&hdma_usart3_tx);
+  vDMA1_Stream1_ISR();
   /* USER CODE BEGIN DMA1_Stream1_IRQn 1 */
 
   /* USER CODE END DMA1_Stream1_IRQn 1 */
+}
+
+/**
+  * @brief Inline ISR implementation for USART3.
+  */
+static inline void vUSART3_ISR(void)
+{
+  HAL_UART_IRQHandler(pxDrvH_UartGetHandle());
 }
 
 /**
@@ -236,10 +260,18 @@ void USART3_IRQHandler(void)
   /* USER CODE BEGIN USART3_IRQn 0 */
 
   /* USER CODE END USART3_IRQn 0 */
-  HAL_UART_IRQHandler(&huart3);
+  vUSART3_ISR();
   /* USER CODE BEGIN USART3_IRQn 1 */
 
   /* USER CODE END USART3_IRQn 1 */
+}
+
+/**
+  * @brief Inline ISR implementation for User Button.
+  */
+static inline void vEXTI15_10_ISR(void)
+{
+  BSP_PB_IRQHandler(BUTTON_USER);
 }
 
 /**
@@ -250,7 +282,7 @@ void EXTI15_10_IRQHandler(void)
   /* USER CODE BEGIN EXTI15_10_IRQn 0 */
 
   /* USER CODE END EXTI15_10_IRQn 0 */
-  BSP_PB_IRQHandler(BUTTON_USER);
+  vEXTI15_10_ISR();
   /* USER CODE BEGIN EXTI15_10_IRQn 1 */
 
   /* USER CODE END EXTI15_10_IRQn 1 */
