@@ -40,17 +40,20 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.serial_thread.curva_recebida.connect(self.processar_nova_curva)
         self.serial_thread.erro_serial.connect(self.tratar_erro_serial)
         
+        # Resolve caminhos relativos ao diretório do script para máxima portabilidade
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+
         # Gerenciamento de Datasets (Cache inteligente)
         self.dataset_manager = DatasetManager()
         
         # Parâmetros físicos
         self.dt_us = 0.21875  # Padrão calibrado: 256 pontos em 56 us
-        self.arquivo_csv = "dataset_cupons_indutancia.csv"
+        self.arquivo_csv = os.path.join(self.base_dir, "datasets", "dataset_cupons_indutancia.csv")
         self.leitura_ativa = False
         self.capturar_uma_curva = False
         
         # Gerenciamento de materiais customizados
-        self.arquivo_materiais_config = "materiais_customizados.txt"
+        self.arquivo_materiais_config = os.path.join(self.base_dir, "materiais_customizados.txt")
         self.custom_materials = self.carregar_lista_materiais()
         self.todos_materiais = ["A36 Comum", "A36 GE", "A36 GF"] + self.custom_materials + ["Ar Livre"]
         self.radio_buttons_material = {}
@@ -90,7 +93,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.val_mat_matches = 0
         self.val_cls_matches = 0
         self.val_test_data = [] # Lista para armazenar estatísticas do ensaio corrente
-        self.arquivo_csv_validacao = "testes_validacao_ia.csv"
+        self.arquivo_csv_validacao = os.path.join(self.base_dir, "datasets", "testes_validacao_ia.csv")
 
         # Limites Y atuais para a escala adaptativa estável (com histerese de ruído)
         self.current_y_limit_bruto = None
