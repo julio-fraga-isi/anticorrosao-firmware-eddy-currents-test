@@ -118,6 +118,13 @@ class DatasetManager:
         tau, auc = calcular_tau_e_auc(curva, dt_us)
         
         # Write to file
+        dir_name = os.path.dirname(filepath)
+        if dir_name and not os.path.exists(dir_name):
+            try:
+                os.makedirs(dir_name, exist_ok=True)
+            except Exception:
+                pass
+
         escrever_cabecalho = not os.path.exists(filepath)
         try:
             with open(filepath, "a", newline="", encoding="utf-8") as f:

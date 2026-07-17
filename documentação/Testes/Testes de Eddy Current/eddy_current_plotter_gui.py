@@ -42,7 +42,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         # Resolve caminhos relativos de forma compatível com PyInstaller (.exe) e código-fonte (.py)
         if hasattr(sys, '_MEIPASS'):
-            self.base_dir = os.path.dirname(os.path.abspath(sys.executable))
+            self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
         else:
             self.base_dir = os.path.dirname(os.path.abspath(__file__))
 
