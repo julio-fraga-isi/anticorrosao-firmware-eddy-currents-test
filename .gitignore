@@ -25,3 +25,6 @@ venv/
 
 # Custom configurations
 materiais_customizados.txt
+
+# Executables
+*.exe

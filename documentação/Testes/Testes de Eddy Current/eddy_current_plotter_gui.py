@@ -40,8 +40,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.serial_thread.curva_recebida.connect(self.processar_nova_curva)
         self.serial_thread.erro_serial.connect(self.tratar_erro_serial)
         
-        # Resolve caminhos relativos ao diretório do script para máxima portabilidade
-        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        # Resolve caminhos relativos de forma compatível com PyInstaller (.exe) e código-fonte (.py)
+        if hasattr(sys, '_MEIPASS'):
+            self.base_dir = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            self.base_dir = os.path.dirname(os.path.abspath(__file__))
 
         # Gerenciamento de Datasets (Cache inteligente)
         self.dataset_manager = DatasetManager()
