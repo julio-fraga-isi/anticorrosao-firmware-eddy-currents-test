@@ -51,10 +51,10 @@
 									<listOptionValue builtIn="false" value="../Drivers/BSP/STM32H7xx_Nucleo"/>
 									<listOptionValue builtIn="false" value="../Drivers/CMSIS/Device/ST/STM32H7xx/Include"/>
 									<listOptionValue builtIn="false" value="../Drivers/CMSIS/Include"/>
-									<listOptionValue builtIn="false" value="../Application/Config"/>
-									<listOptionValue builtIn="false" value="../Application/Drivers"/>
-									<listOptionValue builtIn="false" value="../Application/Services"/>
-									<listOptionValue builtIn="false" value="../Application/Apps"/>
+									<listOptionValue builtIn="false" value="../Application/Config/Inc"/>
+									<listOptionValue builtIn="false" value="../Application/Drivers/Inc"/>
+									<listOptionValue builtIn="false" value="../Application/Services/Inc"/>
+									<listOptionValue builtIn="false" value="../Application/Apps/Inc"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.824109948" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
@@ -135,10 +135,10 @@
 									<listOptionValue builtIn="false" value="../Drivers/BSP/STM32H7xx_Nucleo"/>
 									<listOptionValue builtIn="false" value="../Drivers/CMSIS/Device/ST/STM32H7xx/Include"/>
 									<listOptionValue builtIn="false" value="../Drivers/CMSIS/Include"/>
-									<listOptionValue builtIn="false" value="../Application/Config"/>
-									<listOptionValue builtIn="false" value="../Application/Drivers"/>
-									<listOptionValue builtIn="false" value="../Application/Services"/>
-									<listOptionValue builtIn="false" value="../Application/Apps"/>
+									<listOptionValue builtIn="false" value="../Application/Config/Inc"/>
+									<listOptionValue builtIn="false" value="../Application/Drivers/Inc"/>
+									<listOptionValue builtIn="false" value="../Application/Services/Inc"/>
+									<listOptionValue builtIn="false" value="../Application/Apps/Inc"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.1217188686" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
