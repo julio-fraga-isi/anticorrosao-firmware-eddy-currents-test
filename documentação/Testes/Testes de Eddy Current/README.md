@@ -11,6 +11,7 @@ Abaixo está o mapeamento dos arquivos deste subdiretório:
 ```
 documentação/Testes/Testes de Eddy Current/
 ├── README.md (Este manual)
+├── analise_detalhada_dataset.md (Relatório de análise avançada do dataset de 14.000 amostras)
 ├── datasets/
 │   ├── dataset_cupons_indutancia.csv (Base principal de calibração / 19 MB)
 │   ├── dataset_cupons_indutancia_backup.csv (Backup geral)

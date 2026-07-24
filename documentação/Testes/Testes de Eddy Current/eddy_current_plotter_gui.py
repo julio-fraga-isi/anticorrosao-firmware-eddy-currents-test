@@ -1716,6 +1716,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     pontos.append((a['material'], a['classe'], a['tau'], a['auc']))
                     
             if len(pontos) < 3:
+                # Fallback: se não houver amostras suficientes para a opção selecionada, usa todas as amostras disponíveis
+                pontos = [(a['material'], a['classe'], a['tau'], a['auc']) for a in amostras]
+                
+            if len(pontos) < 3:
                 if placa_estava_ativa and self.serial_thread.running:
                     self.serial_thread.enviar_comando(b'r')
                 return
@@ -2437,6 +2441,25 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             usa_filtro = self.chk_salvar_media_movel.isChecked()
             for a in amostras:
                 if a['is_filtered'] == usa_filtro:
+                    valores_arr = np.array(a['curva'])
+                    peak_idx = np.argmax(valores_arr)
+                    decay = valores_arr[peak_idx:]
+                    n_final = max(5, int(len(decay) * 0.1))
+                    offset = np.mean(decay[-n_final:])
+                    decay_adj = np.clip(decay - offset, 0, None)
+                    
+                    self.amostras_estatisticas.append({
+                        "id": a['id_amostra'],
+                        "material": a['material'],
+                        "classe": a['classe'],
+                        "auc": a['auc'],
+                        "tau": a['tau'],
+                        "curva": decay_adj,
+                        "dt_us": a['dt_us']
+                    })
+                    
+            if len(self.amostras_estatisticas) == 0:
+                for a in amostras:
                     valores_arr = np.array(a['curva'])
                     peak_idx = np.argmax(valores_arr)
                     decay = valores_arr[peak_idx:]

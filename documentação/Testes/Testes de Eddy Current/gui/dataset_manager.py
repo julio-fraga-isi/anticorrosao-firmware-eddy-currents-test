@@ -98,7 +98,7 @@ class DatasetManager:
                 is_filtered = False
                 if len(curva) >= 60:
                     tail_noise = np.var(np.diff(np.diff(curva[-60:])))
-                    is_filtered = (tail_noise < 100000.0)
+                    is_filtered = (tail_noise < 5500.0)
 
                 records.append({
                     'id_amostra': id_amostra,
