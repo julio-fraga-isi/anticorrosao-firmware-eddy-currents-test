@@ -20,303 +20,14 @@ import struct
 from PyQt5 import QtCore, QtWidgets, QtGui
 import pyqtgraph as pg
 
+# Importações dos submódulos modularizados
+from gui.utils import normalizar_nome_classe, calcular_tau_e_auc
+from gui.widgets import ExclusaoSeletivaDialog, CollapsibleGroupBox
+from gui.serial_worker import SerialWorker
+from gui.dataset_manager import DatasetManager
+
 # Configurações do Gráfico de Tendência
 MAX_TREND_POINTS = 200
-
-def normalizar_nome_classe(classe_str):
-    import unicodedata
-    # Remove acentos e converte para minúsculas
-    norm = "".join(c for c in unicodedata.normalize('NFD', classe_str) if unicodedata.category(c) != 'Mn').lower().strip()
-    
-    # Mapeia para a classe canônica
-    if "saudavel" in norm:
-        return "Saudável"
-    elif "leve" in norm:
-        return "Leve"
-    elif "moderada" in norm:
-        return "Moderada"
-    elif "avancada" in norm:
-        return "Avançada"
-    elif "corr" in norm: # corroído, corroido, etc.
-        return "Corroído"
-    elif "ar" in norm or "livre" in norm or "vazio" in norm or "sem" in norm:
-        return "Ar Livre"
-    else:
-        return classe_str.strip().capitalize()
-
-class ExclusaoSeletivaDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        
-        import os
-        nome_arquivo = "Sem Arquivo"
-        if parent and hasattr(parent, 'arquivo_csv'):
-            nome_arquivo = os.path.basename(parent.arquivo_csv)
-            
-        self.setWindowTitle(f"Excluir Dados - {nome_arquivo}")
-        self.setMinimumWidth(360)
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #1e1e1e;
-                color: #e1e1e6;
-            }
-            QLabel {
-                color: #a0a0b2;
-                font-size: 10pt;
-                font-weight: bold;
-            }
-            QComboBox {
-                background-color: #2c2c2e;
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                color: #e1e1e6;
-                padding: 5px;
-                min-height: 25px;
-            }
-            QPushButton {
-                font-weight: bold;
-                border-radius: 4px;
-                padding: 8px;
-                min-height: 30px;
-            }
-        """)
-        
-        layout = QtWidgets.QVBoxLayout(self)
-        
-        lbl_info = QtWidgets.QLabel(f"Critérios de exclusão para o arquivo:\n➔ {nome_arquivo}")
-        lbl_info.setStyleSheet("font-weight: bold; color: #f1c40f; margin-bottom: 10px; font-size: 10pt;")
-        layout.addWidget(lbl_info)
-        
-        # Dropdown de Material
-        layout.addWidget(QtWidgets.QLabel("Material:"))
-        self.combo_material = QtWidgets.QComboBox()
-        self.combo_material.addItems(["[Todos os Materiais]", "A36 Comum", "A36 GE", "A36 GF", "Ar Livre"])
-        layout.addWidget(self.combo_material)
-        
-        # Dropdown de Classe
-        layout.addWidget(QtWidgets.QLabel("Classe/Degradação:"))
-        self.combo_classe = QtWidgets.QComboBox()
-        self.combo_classe.addItems(["[Todas as Classes]", "Saudável", "Leve", "Moderada", "Avançada", "Corroído", "Ar Livre"])
-        layout.addWidget(self.combo_classe)
-        
-        layout.addSpacing(15)
-        
-        # Botões
-        btn_layout = QtWidgets.QHBoxLayout()
-        self.btn_cancelar = QtWidgets.QPushButton("Cancelar")
-        self.btn_cancelar.setStyleSheet("background-color: #3a3a3c; color: white;")
-        self.btn_cancelar.clicked.connect(self.reject)
-        
-        self.btn_excluir = QtWidgets.QPushButton("Excluir Selecionados")
-        self.btn_excluir.setStyleSheet("background-color: #c0392b; color: white;")
-        self.btn_excluir.clicked.connect(self.accept)
-        
-        btn_layout.addWidget(self.btn_cancelar)
-        btn_layout.addWidget(self.btn_excluir)
-        layout.addLayout(btn_layout)
-
-class CollapsibleGroupBox(QtWidgets.QWidget):
-    def __init__(self, title, parent=None):
-        super().__init__(parent)
-        self.layout_principal = QtWidgets.QVBoxLayout(self)
-        self.layout_principal.setContentsMargins(0, 0, 0, 0)
-        self.layout_principal.setSpacing(0)
-        
-        # Barra de Cabeçalho clicável (Widget customizado)
-        self.header_widget = QtWidgets.QWidget()
-        self.header_widget.setStyleSheet("""
-            QWidget {
-                background-color: #2c2c2e;
-                border: 1px solid #3a3a3c;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-            }
-        """)
-        header_layout = QtWidgets.QHBoxLayout(self.header_widget)
-        header_layout.setContentsMargins(12, 8, 12, 8)
-        
-        # Título
-        self.lbl_title = QtWidgets.QLabel(title)
-        self.lbl_title.setStyleSheet("font-weight: bold; font-size: 10pt; color: #e1e1e6; border: none; background: transparent;")
-        header_layout.addWidget(self.lbl_title)
-        
-        # Spacer no meio
-        header_layout.addStretch()
-        
-        # Ícone de seta
-        self.lbl_arrow = QtWidgets.QLabel("▲")
-        self.lbl_arrow.setStyleSheet("font-weight: bold; font-size: 10pt; color: #a0a0b2; border: none; background: transparent;")
-        header_layout.addWidget(self.lbl_arrow)
-        
-        self.layout_principal.addWidget(self.header_widget)
-        
-        # Torna o cabeçalho clicável detectando o mousePressEvent
-        self.header_widget.mousePressEvent = self.toggle_collapse
-        self.expandido = True
-        
-        # Widget container para o conteúdo (inicialmente sem layout para evitar rejeição do Qt)
-        self.content_container = QtWidgets.QGroupBox()
-        self.content_container.setStyleSheet("""
-            QGroupBox {
-                background-color: #1e1e1f;
-                border: 1px solid #3a3a3c;
-                border-top: none;
-                border-bottom-left-radius: 6px;
-                border-bottom-right-radius: 6px;
-                padding: 10px;
-            }
-        """)
-        self.layout_principal.addWidget(self.content_container)
-        
-    def toggle_collapse(self, event):
-        self.expandido = not self.expandido
-        self.content_container.setVisible(self.expandido)
-        self.lbl_arrow.setText("▲" if self.expandido else "▼")
-        # Ajusta os cantos arredondados do cabeçalho se colapsado
-        if self.expandido:
-            self.header_widget.setStyleSheet("""
-                QWidget {
-                    background-color: #2c2c2e;
-                    border: 1px solid #3a3a3c;
-                    border-top-left-radius: 6px;
-                    border-top-right-radius: 6px;
-                }
-            """)
-        else:
-            self.header_widget.setStyleSheet("""
-                QWidget {
-                    background-color: #2c2c2e;
-                    border: 1px solid #3a3a3c;
-                    border-radius: 6px;
-                }
-            """)
-            
-    def setLayout(self, layout):
-        # Configura as margens e espaçamento padrão no layout do usuário
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
-        self.content_container.setLayout(layout)
-
-class SerialWorker(QtCore.QThread):
-    """Thread em segundo plano para comunicação serial sem travar a interface"""
-    curva_recebida = QtCore.pyqtSignal(list, int)
-    erro_serial = QtCore.pyqtSignal(str)
-
-    def __init__(self):
-        super().__init__()
-        self.porta = None
-        self.baud = 921600
-        self.running = False
-        self.trigger_requested = False
-        self.modo_ets = False
-        self.ser = None
-        self.mutex = QtCore.QMutex()
-
-    def set_modo_ets(self, enabled):
-        self.mutex.lock()
-        self.modo_ets = enabled
-        self.mutex.unlock()
-
-    def enviar_config_frequencia(self, period_ms):
-        self.mutex.lock()
-        try:
-            if self.ser and self.ser.is_open:
-                # Envia 'f' (0x66) seguido pelo período em ms (1 byte)
-                self.ser.write(struct.pack('<BB', ord('f'), int(period_ms)))
-                print(f"[SERIAL] Comando enviado: Frequência síncrona ajustada para {period_ms} ms (~{1000/period_ms:.1f} Hz)")
-        except Exception as e:
-            print(f"[ERRO SERIAL] Falha ao enviar comando de frequência: {e}")
-        finally:
-            self.mutex.unlock()
-
-    def enviar_comando(self, cmd_byte):
-        self.mutex.lock()
-        try:
-            if self.ser and self.ser.is_open:
-                self.ser.write(cmd_byte)
-                print(f"[SERIAL] Comando enviado: {cmd_byte.decode('utf-8', errors='ignore')}")
-        except Exception as e:
-            print(f"[ERRO SERIAL] Falha ao enviar comando: {e}")
-        finally:
-            self.mutex.unlock()
-
-    def enviar_config_dt(self, dt_ns):
-        self.mutex.lock()
-        try:
-            if self.ser and self.ser.is_open:
-                # Envia 'd' (0x64) seguido do dt em ns (uint16_t, formato little-endian)
-                self.ser.write(struct.pack('<BH', ord('d'), int(dt_ns)))
-                print(f"[SERIAL] Comando enviado: Intervalo dt físico ajustado para {dt_ns} ns")
-        except Exception as e:
-            print(f"[ERRO SERIAL] Falha ao enviar comando de dt: {e}")
-        finally:
-            self.mutex.unlock()
-
-    def conectar(self, porta, baud=921600):
-        self.porta = porta
-        self.baud = baud
-        self.running = True
-        self.start()
-
-    def desconectar(self):
-        self.running = False
-        self.wait()
-
-    def disparar_leitura(self):
-        self.mutex.lock()
-        self.trigger_requested = True
-        self.mutex.unlock()
-
-    def run(self):
-        try:
-            # timeout de 100ms para permitir interrupção rápida de self.running
-            self.ser = serial.Serial(self.porta, self.baud, timeout=0.1)
-        except Exception as e:
-            self.erro_serial.emit(str(e))
-            return
-
-        sync_state = 0
-        try:
-            self.ser.reset_input_buffer()
-        except Exception:
-            pass
-
-        while self.running:
-            try:
-                # Esvazia a variável trigger_requested se ela for acionada (não usada no disparo contínuo)
-                self.mutex.lock()
-                if self.trigger_requested:
-                    self.trigger_requested = False
-                self.mutex.unlock()
-
-                # Busca pelo cabeçalho de sincronização [0xAA, 0x55, 0xAA, 0x55]
-                b = self.ser.read(1)
-                if not b:
-                    continue
-                
-                if sync_state == 0 and b == b'\xaa':
-                    sync_state = 1
-                elif sync_state == 1 and b == b'\x55':
-                    sync_state = 2
-                elif sync_state == 2 and b == b'\xaa':
-                    sync_state = 3
-                elif sync_state == 3 and b == b'\x55':
-                    # Sincronizado! Lê os 516 bytes (512 bytes de dados + 4 bytes de ciclos)
-                    data = self.ser.read(516)
-                    if len(data) == 516:
-                        valores = list(struct.unpack('<256H', data[:512]))
-                        elapsed_cycles = struct.unpack('<I', data[512:516])[0]
-                        self.curva_recebida.emit(valores, elapsed_cycles)
-                    sync_state = 0
-                else:
-                    sync_state = 0
-            except Exception as e:
-                self.erro_serial.emit(str(e))
-                self.msleep(100)
-        
-        if self.ser:
-            self.ser.close()
-            self.ser = None
 
 
 class EddyCurrentPlotter(QtWidgets.QWidget):
@@ -329,14 +40,23 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.serial_thread.curva_recebida.connect(self.processar_nova_curva)
         self.serial_thread.erro_serial.connect(self.tratar_erro_serial)
         
+        # Resolve caminhos relativos de forma compatível com PyInstaller (.exe) e código-fonte (.py)
+        if hasattr(sys, '_MEIPASS'):
+            self.base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))
+        else:
+            self.base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Gerenciamento de Datasets (Cache inteligente)
+        self.dataset_manager = DatasetManager()
+        
         # Parâmetros físicos
         self.dt_us = 0.21875  # Padrão calibrado: 256 pontos em 56 us
-        self.arquivo_csv = "dataset_cupons_indutancia.csv"
+        self.arquivo_csv = os.path.join(self.base_dir, "datasets", "dataset_cupons_indutancia.csv")
         self.leitura_ativa = False
         self.capturar_uma_curva = False
         
         # Gerenciamento de materiais customizados
-        self.arquivo_materiais_config = "materiais_customizados.txt"
+        self.arquivo_materiais_config = os.path.join(self.base_dir, "materiais_customizados.txt")
         self.custom_materials = self.carregar_lista_materiais()
         self.todos_materiais = ["A36 Comum", "A36 GE", "A36 GF"] + self.custom_materials + ["Ar Livre"]
         self.radio_buttons_material = {}
@@ -376,7 +96,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.val_mat_matches = 0
         self.val_cls_matches = 0
         self.val_test_data = [] # Lista para armazenar estatísticas do ensaio corrente
-        self.arquivo_csv_validacao = "testes_validacao_ia.csv"
+        self.arquivo_csv_validacao = os.path.join(self.base_dir, "datasets", "testes_validacao_ia.csv")
 
         # Limites Y atuais para a escala adaptativa estável (com histerese de ruído)
         self.current_y_limit_bruto = None
@@ -508,9 +228,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.chk_auto_trigger.stateChanged.connect(self.alternar_auto_trigger)
         group_acq_layout.addWidget(self.chk_auto_trigger)
 
-        self.chk_ets = QtWidgets.QCheckBox("Modo ETS (Alta Velocidade / 8 MSPS)")
-        self.chk_ets.stateChanged.connect(self.alternar_modo_ets)
-        # group_acq_layout.addWidget(self.chk_ets) # Ocultado - Usando apenas o Modo Padrão (DMA) a 10 Hz
+
 
         # Campo para ajuste manual e visualização do tempo entre amostras (dt_us)
         layout_dt_container = QtWidgets.QVBoxLayout()
@@ -1666,7 +1384,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         }
 
         # Filtra outliers caso a caixinha do IQR esteja marcada ou por padrão
-        amostras_limpas = self.filtrar_outliers_iqr(self.amostras_estatisticas) if hasattr(self, 'filtrar_outliers_iqr') else self.amostras_estatisticas
+        amostras_limpas = self.dataset_manager.filtrar_outliers_iqr(self.amostras_estatisticas)
         
         # Agrupa os dados
         dados_por_classe = {c: {"auc": [], "tau": [], "curvas": []} for c in CLASSES_ORDEM}
@@ -1868,22 +1586,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 self.btn_diag_trigger.setText("Iniciar Diagnóstico")
                 self.btn_diag_trigger.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
 
-    def alternar_modo_ets(self, state):
-        if state == QtCore.Qt.Checked:
-            self.serial_thread.set_modo_ets(True)
-            self.arquivo_csv = "dataset_cupons_indutancia_ets.csv"
-            self.spin_dt.setValue(0.00001)
-            self.plot_decay.setLabel('bottom', 'Tempo (Modo ETS)', 'us')
-            print(f"[INFO] Modo ETS (Tempo Equivalente) ativado. Dataset: {self.arquivo_csv} | dt = 0.00001 us")
-        else:
-            self.serial_thread.set_modo_ets(False)
-            self.arquivo_csv = "dataset_cupons_indutancia.csv"
-            self.spin_dt.setValue(0.21875)
-            self.plot_decay.setLabel('bottom', 'Tempo (Modo DMA)', 'us')
-            print(f"[INFO] Modo DMA (Padrão) ativado. Dataset: {self.arquivo_csv} | dt = 0.21875 us")
-            
-        # Re-treina o classificador e atualiza a IA na hora com base no novo dataset
-        self.treinar_classificador()
+
 
     def atualizar_frequencia_disparo(self, value):
         # Converte frequência (Hz) em período (ms)
@@ -1894,16 +1597,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.serial_thread.enviar_config_frequencia(period_ms)
 
     def atualizar_dt_us(self, value):
-        # Envia a nova configuração de dt físico para a placa se conectado e se não estiver em modo ETS
-        if self.serial_thread.running and not self.chk_ets.isChecked():
+        # Envia a nova configuração de dt físico para a placa se conectado
+        if self.serial_thread.running:
             self.serial_thread.enviar_config_dt(int(value * 1000))
             
         # Re-treina o classificador para recalcular as constantes no novo intervalo dt
         self.treinar_classificador()
-        # Atualiza o rótulo do eixo X se não estiver em modo ETS para refletir a taxa real configurada
-        if not self.chk_ets.isChecked():
-            khz = 1000.0 / value if value > 0 else 0
-            self.plot_decay.setLabel('bottom', f'Tempo (Modo DMA - {khz:.2f} kHz)', 'us')
+        # Atualiza o rótulo do eixo X para refletir a taxa real configurada
+        khz = 1000.0 / value if value > 0 else 0
+        self.plot_decay.setLabel('bottom', f'Tempo (Modo DMA - {khz:.2f} kHz)', 'us')
 
     def ao_alterar_filtro_media_movel(self, state):
         # Limpa cache de estatísticas para forçar releitura do CSV com a nova máscara de filtro
@@ -1998,130 +1700,39 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 self.serial_thread.enviar_comando(b'r')
             return
         
-        conteudo_csv = None
         try:
-            with open(self.arquivo_csv, "r", newline="", encoding="utf-8") as f:
-                conteudo_csv = f.read()
-        except UnicodeDecodeError:
-            try:
-                with open(self.arquivo_csv, "r", newline="", encoding="latin-1") as f:
-                    conteudo_csv = f.read()
-            except Exception:
+            # Obtém amostras do gerenciador com cache
+            amostras = self.dataset_manager.get_records(self.arquivo_csv)
+            if not amostras:
+                if placa_estava_ativa and self.serial_thread.running:
+                    self.serial_thread.enviar_comando(b'r')
                 return
-        except Exception:
-            return
-
-        import io
-        try:
-            f_string = io.StringIO(conteudo_csv)
-            reader = csv.reader(f_string, delimiter=";")
-            headers = next(reader)
-            
-            material_idx = headers.index("material") if "material" in headers else 1
-            classe_idx = headers.index("classe") if "classe" in headers else 2
-            dt_idx = headers.index("dt_us") if "dt_us" in headers else -1
-            p_start_idx = headers.index("p_0") if "p_0" in headers else 4
-            
+                
+            # Filtra dinamicamente os dados do banco para casar com o filtro temporal ativo na UI
+            usa_filtro = self.chk_salvar_media_movel.isChecked() if hasattr(self, 'chk_salvar_media_movel') else False
             pontos = []
-            
-            for row in reader:
-                if not row or len(row) < 260:
-                    continue
-                
-                material = row[material_idx].strip()
-                classe = normalizar_nome_classe(row[classe_idx])
-                
-                # Suporta arquivos mistos (com ou sem a coluna de dt_us)
-                # Formato antigo tem 260 colunas, formato novo (com dt_us) tem 261 colunas
-                if len(row) >= 261:
-                    try:
-                        row_dt = float(row[4].strip()) if row[4].strip() else 0.21875
-                    except ValueError:
-                        row_dt = 0.21875
-                    p_start = 5
-                else:
-                    row_dt = 0.21875
-                    p_start = 4
-                
-                try:
-                    curva = [int(val) for val in row[p_start:p_start+256]]
-                except ValueError as ve:
-                    print(f"[CLASSIFICADOR] Erro ao converter pontos da curva: {ve} | Linha: {row[:5]}")
-                    continue
-                
-                # Filtra dinamicamente os dados do banco para casar com o filtro temporal ativo na UI
-                if len(curva) >= 60:
-                    tail_noise = np.var(np.diff(np.diff(curva[-60:])))
-                    usa_filtro = self.chk_salvar_media_movel.isChecked()
-                    is_filtered = (tail_noise < 100000.0)
-                    if usa_filtro != is_filtered:
-                        continue
-                
-                peak_idx = np.argmax(curva)
-                decay = np.array(curva[peak_idx:])
-                n_final = max(5, int(len(decay) * 0.1))
-                offset = np.mean(decay[-n_final:])
-                decay_adj = np.clip(decay - offset, 1e-5, None)
-                
-                auc = np.sum(decay_adj) * row_dt
-                n_fit = int(len(decay_adj) * 0.3)
-                if n_fit < 3: n_fit = 3
-                y_log = np.log(decay_adj[:n_fit])
-                t_fit = np.arange(n_fit) * row_dt
-                
-                try:
-                    B, A = np.polyfit(t_fit, y_log, 1)
-                    tau = -1.0 / B if B != 0 else 0.0
-                except Exception:
-                    tau = 0.0
-                
-                if tau > 0:
-                    pontos.append((material, classe, tau, auc))
+            for a in amostras:
+                if a['is_filtered'] == usa_filtro:
+                    pontos.append((a['material'], a['classe'], a['tau'], a['auc']))
                     
             if len(pontos) < 3:
+                # Fallback: se não houver amostras suficientes para a opção selecionada, usa todas as amostras disponíveis
+                pontos = [(a['material'], a['classe'], a['tau'], a['auc']) for a in amostras]
+                
+            if len(pontos) < 3:
+                if placa_estava_ativa and self.serial_thread.running:
+                    self.serial_thread.enviar_comando(b'r')
                 return
                 
             # Agrupa pontos por material e classe para remoção de outliers usando IQR
-            grupos = {}
-            for mat, cls, tau, auc in pontos:
-                key = (mat, cls)
-                if key not in grupos:
-                    grupos[key] = []
-                grupos[key].append((tau, auc))
+            amostras_temp = [{'material': p[0], 'classe': p[1], 'tau': p[2], 'auc': p[3]} for p in pontos]
+            amostras_filtradas = self.dataset_manager.filtrar_outliers_iqr(amostras_temp)
+            
+            if len(amostras_filtradas) < 3:
+                amostras_filtradas = amostras_temp
                 
-            pontos_filtrados = []
-            for key, grupo in grupos.items():
-                if len(grupo) < 4:
-                    # Sem amostras suficientes para IQR confiável, mantém todas
-                    for tau, auc in grupo:
-                        pontos_filtrados.append((key[0], key[1], tau, auc))
-                    continue
-                    
-                taus_grupo = [g[0] for g in grupo]
-                aucs_grupo = [g[1] for g in grupo]
-                
-                # IQR para Tau
-                q1_tau, q3_tau = np.percentile(taus_grupo, [25, 75])
-                iqr_tau = q3_tau - q1_tau
-                lim_inf_tau = q1_tau - 1.5 * iqr_tau
-                lim_sup_tau = q3_tau + 1.5 * iqr_tau
-                
-                # IQR para AUC
-                q1_auc, q3_auc = np.percentile(aucs_grupo, [25, 75])
-                iqr_auc = q3_auc - q1_auc
-                lim_inf_auc = q1_auc - 1.5 * iqr_auc
-                lim_sup_auc = q3_auc + 1.5 * iqr_auc
-                
-                for tau, auc in grupo:
-                    if (lim_inf_tau <= tau <= lim_sup_tau) and (lim_inf_auc <= auc <= lim_sup_auc):
-                        pontos_filtrados.append((key[0], key[1], tau, auc))
-                        
-            if len(pontos_filtrados) < 3:
-                # Fallback caso a filtragem remova pontos excessivos
-                pontos_filtrados = pontos
-                
-            taus_limpos = [p[2] for p in pontos_filtrados]
-            aucs_limpos = [p[3] for p in pontos_filtrados]
+            taus_limpos = [p['tau'] for p in amostras_filtradas]
+            aucs_limpos = [p['auc'] for p in amostras_filtradas]
             
             self.tau_min = np.min(taus_limpos)
             self.tau_max = np.max(taus_limpos)
@@ -2133,18 +1744,18 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             
             # Recalcula centroides com os pontos limpos
             grupos_limpos = {}
-            for mat, cls, tau, auc in pontos_filtrados:
-                key = (mat, cls)
+            for p in amostras_filtradas:
+                key = (p['material'], p['classe'])
                 if key not in grupos_limpos:
                     grupos_limpos[key] = []
-                grupos_limpos[key].append((tau, auc))
+                grupos_limpos[key].append((p['tau'], p['auc']))
                 
             for key, vals in grupos_limpos.items():
                 mean_tau = np.mean([v[0] for v in vals])
                 mean_auc = np.mean([v[1] for v in vals])
                 self.centroids[key] = (mean_tau, mean_auc)
                 
-            print(f"[CLASSIFICADOR] Treinado com {len(self.centroids)} classes a partir do CSV.")
+            print(f"[CLASSIFICADOR] Treinado com {len(self.centroids)} classes a partir do CSV (com cache).")
         except Exception as e:
             print(f"[CLASSIFICADOR] Erro ao treinar: {e}")
         finally:
@@ -2219,9 +1830,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             khz = 1000.0 / dt if dt > 0 else 0
             self.lbl_dt_medido.setText(f"dt Real Medido: {dt:.5f} μs ({khz:.2f} kHz)")
             
-            # Se não estiver em modo ETS, usa o dt medido para a IA e cálculo temporal do gráfico
-            if not self.chk_ets.isChecked():
-                self.dt_us = dt
+            self.dt_us = dt
 
         # Se a suavização de transiente estiver ativa, aplica média móvel ponto a ponto na curva
         if self.chk_filtrar_curva.isChecked():
@@ -2506,16 +2115,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     # SALVAR MEDIÇÃO NO ARQUIVO CSV
     # =====================================================================
     def registrar_linha_csv(self, id_amostra, material, classe, valores, timestamp, silent=False):
-        linha_dados = [id_amostra, material, classe, timestamp, self.dt_us] + valores
         try:
-            escrever_cabecalho = not os.path.exists(self.arquivo_csv)
-            with open(self.arquivo_csv, "a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f, delimiter=";")
-                if escrever_cabecalho:
-                    cabecalho = ["id_amostra", "material", "classe", "timestamp", "dt_us"] + [f"p_{i}" for i in range(256)]
-                    writer.writerow(cabecalho)
-                writer.writerow(linha_dados)
-                
+            self.dataset_manager.append_record(self.arquivo_csv, id_amostra, material, classe, self.dt_us, valores, timestamp)
             if not silent:
                 print(f"[SALVO] ID: {id_amostra} | Material: {material} | Classe: {classe} | Tau: {self.last_tau:.2f} | AUC: {self.last_auc:.1f}")
             
@@ -2538,6 +2139,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     "Arquivo Bloqueado", 
                     f"Erro de permissão ao salvar no arquivo '{self.arquivo_csv}'!\n\nCertifique-se de que o arquivo não está aberto no Excel ou em outro visualizador."
                 )
+            return False
+        except Exception as e:
+            if not silent:
+                print(f"[ERRO] Falha ao salvar no CSV: {e}")
             return False
 
     def obter_material_e_classe_selecionados(self):
@@ -2781,6 +2386,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 try:
                     if os.path.exists(self.arquivo_csv):
                         os.remove(self.arquivo_csv)
+                    self.dataset_manager.invalidate_cache(self.arquivo_csv)
                     self.pontos_salvos.clear()
                     self.list_historico.clear()
                     self.centroids = {}
@@ -2796,6 +2402,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                         writer = csv.writer(f, delimiter=";")
                         writer.writerows(linhas_preservadas)
                         
+                    self.dataset_manager.invalidate_cache(self.arquivo_csv)
                     self.pontos_salvos.clear()
                     self.list_historico.clear()
                     self.treinar_classificador()
@@ -2815,45 +2422,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.serial_thread.desconectar()
         event.accept()
 
-    def filtrar_outliers_iqr(self, amostras):
-        grupos = {}
-        for a in amostras:
-            key = (a['material'], a['classe'])
-            if key not in grupos:
-                grupos[key] = []
-            grupos[key].append(a)
-            
-        amostras_filtradas = []
-        
-        for key, grupo in grupos.items():
-            if len(grupo) < 4:
-                # Sem amostras suficientes para IQR confiável, mantém todas
-                amostras_filtradas.extend(grupo)
-                continue
-                
-            taus = [a['tau'] for a in grupo]
-            aucs = [a['auc'] for a in grupo]
-            
-            # IQR para Tau
-            q1_tau, q3_tau = np.percentile(taus, [25, 75])
-            iqr_tau = q3_tau - q1_tau
-            lim_inf_tau = q1_tau - 1.5 * iqr_tau
-            lim_sup_tau = q3_tau + 1.5 * iqr_tau
-            
-            # IQR para AUC
-            q1_auc, q3_auc = np.percentile(aucs, [25, 75])
-            iqr_auc = q3_auc - q1_auc
-            lim_inf_auc = q1_auc - 1.5 * iqr_auc
-            lim_sup_auc = q3_auc + 1.5 * iqr_auc
-            
-            # Filtra
-            for a in grupo:
-                is_ok_tau = (lim_inf_tau <= a['tau'] <= lim_sup_tau)
-                is_ok_auc = (lim_inf_auc <= a['auc'] <= lim_sup_auc)
-                if is_ok_tau and is_ok_auc:
-                    amostras_filtradas.append(a)
-                    
-        return amostras_filtradas
+
 
     def rodar_analise_estatistica(self):
         if not os.path.exists(self.arquivo_csv):
@@ -2864,104 +2433,49 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             )
             return
 
-        # Tenta carregar o arquivo com UTF-8 e faz fallback para Latin-1 se falhar
-        conteudo_csv = None
         try:
-            with open(self.arquivo_csv, "r", newline="", encoding="utf-8") as f:
-                conteudo_csv = f.read()
-        except UnicodeDecodeError:
-            try:
-                with open(self.arquivo_csv, "r", newline="", encoding="latin-1") as f:
-                    conteudo_csv = f.read()
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(self, "Erro de Leitura", f"Erro ao ler arquivo CSV:\n{str(e)}")
-                return
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "Erro de Leitura", f"Erro ao ler arquivo CSV:\n{str(e)}")
-            return
-
-        import io
-        try:
-            f_string = io.StringIO(conteudo_csv)
-            reader = csv.reader(f_string, delimiter=";")
-            headers = next(reader)
-            
-            # Identifica as colunas de interesse de forma robusta e dinâmica pelo cabeçalho
-            id_idx = headers.index("id_amostra") if "id_amostra" in headers else 0
-            material_idx = headers.index("material") if "material" in headers else 1
-            classe_idx = headers.index("classe") if "classe" in headers else 2
-            dt_idx = headers.index("dt_us") if "dt_us" in headers else -1
-            p_start_idx = headers.index("p_0") if "p_0" in headers else 4
-            
+            # Obtém amostras do gerenciador com cache
+            amostras = self.dataset_manager.get_records(self.arquivo_csv)
             self.amostras_estatisticas = [] # Limpa a lista anterior
             
-            for row in reader:
-                if not row or len(row) < 260:
-                    continue
-                
-                id_amostra = row[id_idx].strip()
-                material = row[material_idx].strip() if len(row) > material_idx else "A36 Comum"
-                classe = normalizar_nome_classe(row[classe_idx])
-                
-                # Suporta arquivos mistos (com ou sem a coluna de dt_us)
-                # Formato antigo tem 260 colunas, formato novo (com dt_us) tem 261 colunas
-                if len(row) >= 261:
-                    try:
-                        row_dt = float(row[4].strip()) if row[4].strip() else 0.21875
-                    except ValueError:
-                        row_dt = 0.21875
-                    p_start = 5
-                else:
-                    row_dt = 0.21875
-                    p_start = 4
-                
-                try:
-                    curva = [int(val) for val in row[p_start:p_start+256]]
-                except ValueError:
-                    continue
-                
-                # Filtra dinamicamente os dados do banco para casar com o filtro temporal ativo na UI
-                if len(curva) >= 60:
-                    tail_noise = np.var(np.diff(np.diff(curva[-60:])))
-                    usa_filtro = self.chk_salvar_media_movel.isChecked()
-                    is_filtered = (tail_noise < 100000.0)
-                    if usa_filtro != is_filtered:
-                        continue
-                
-                # Processamento matemático idêntico ao de aquisição em tempo real
-                peak_idx = np.argmax(curva)
-                decay = np.array(curva[peak_idx:])
-                
-                # Offset (últimos 10% da curva de decaimento)
-                n_final = max(5, int(len(decay) * 0.1))
-                offset = np.mean(decay[-n_final:])
-                
-                # AUC
-                decay_adj = np.clip(decay - offset, 0, None)
-                auc = np.sum(decay_adj) * row_dt
-                
-                # Tau
-                decay_log = np.clip(decay - offset, 1e-5, None)
-                n_fit = int(len(decay_log) * 0.3)
-                y_log = np.log(decay_log[:n_fit])
-                t_fit = np.arange(n_fit) * row_dt
-                try:
-                    B, A = np.polyfit(t_fit, y_log, 1)
-                    tau = -1.0 / B if B != 0 else 0.0
-                except Exception:
-                    tau = 0.0
-
-                # Cria a estrutura de amostra para armazenamento em memória
-                amostra = {
-                    "id": id_amostra,
-                    "material": material,
-                    "classe": classe,
-                    "auc": auc,
-                    "tau": tau,
-                    "curva": decay_adj,
-                    "dt_us": row_dt
-                }
-                self.amostras_estatisticas.append(amostra)
+            usa_filtro = self.chk_salvar_media_movel.isChecked()
+            for a in amostras:
+                if a['is_filtered'] == usa_filtro:
+                    valores_arr = np.array(a['curva'])
+                    peak_idx = np.argmax(valores_arr)
+                    decay = valores_arr[peak_idx:]
+                    n_final = max(5, int(len(decay) * 0.1))
+                    offset = np.mean(decay[-n_final:])
+                    decay_adj = np.clip(decay - offset, 0, None)
+                    
+                    self.amostras_estatisticas.append({
+                        "id": a['id_amostra'],
+                        "material": a['material'],
+                        "classe": a['classe'],
+                        "auc": a['auc'],
+                        "tau": a['tau'],
+                        "curva": decay_adj,
+                        "dt_us": a['dt_us']
+                    })
+                    
+            if len(self.amostras_estatisticas) == 0:
+                for a in amostras:
+                    valores_arr = np.array(a['curva'])
+                    peak_idx = np.argmax(valores_arr)
+                    decay = valores_arr[peak_idx:]
+                    n_final = max(5, int(len(decay) * 0.1))
+                    offset = np.mean(decay[-n_final:])
+                    decay_adj = np.clip(decay - offset, 0, None)
+                    
+                    self.amostras_estatisticas.append({
+                        "id": a['id_amostra'],
+                        "material": a['material'],
+                        "classe": a['classe'],
+                        "auc": a['auc'],
+                        "tau": a['tau'],
+                        "curva": decay_adj,
+                        "dt_us": a['dt_us']
+                    })
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Erro de Leitura", f"Erro ao processar o arquivo CSV:\n{str(e)}")
             return
@@ -3011,7 +2525,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         # Filtra outliers caso a caixinha esteja marcada
         if self.chk_filter_outliers.isChecked():
-            self.amostras_filtradas = self.filtrar_outliers_iqr(self.amostras_filtradas)
+            self.amostras_filtradas = self.dataset_manager.filtrar_outliers_iqr(self.amostras_filtradas)
 
         if not self.amostras_filtradas:
             self.txt_report_stats.setPlainText("Sem dados correspondentes aos filtros selecionados.")
