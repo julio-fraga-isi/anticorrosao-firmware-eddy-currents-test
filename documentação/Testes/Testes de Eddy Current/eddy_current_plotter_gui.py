@@ -9,6 +9,7 @@ e gravação dos datasets experimentais.
 import sys
 import os
 import csv
+import json
 import time
 import numpy as np
 from datetime import datetime
@@ -25,6 +26,7 @@ from gui.utils import normalizar_nome_classe, calcular_tau_e_auc
 from gui.widgets import ExclusaoSeletivaDialog, CollapsibleGroupBox
 from gui.serial_worker import SerialWorker
 from gui.dataset_manager import DatasetManager
+from gui.coil_manager import CoilCharacterizationManager, CoilRegistrationDialog, Coil3DPlotDialog
 
 # Configurações do Gráfico de Tendência
 MAX_TREND_POINTS = 200
@@ -46,8 +48,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         else:
             self.base_dir = os.path.dirname(os.path.abspath(__file__))
 
-        # Gerenciamento de Datasets (Cache inteligente)
+        # Gerenciamento de Datasets e Bobinas (Cache inteligente)
         self.dataset_manager = DatasetManager()
+        self.coil_manager = CoilCharacterizationManager(base_dir=self.base_dir)
+        self.caracterizacao_dir = os.path.join(self.base_dir, "datasets", "caracterizacao_bobinas")
+        self.loaded_coil_records = []
+        self.imported_file_paths = []
         
         # Parâmetros físicos
         self.dt_us = 0.21875  # Padrão calibrado: 256 pontos em 56 us
@@ -55,10 +61,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.leitura_ativa = False
         self.capturar_uma_curva = False
         
-        # Gerenciamento de materiais customizados
-        self.arquivo_materiais_config = os.path.join(self.base_dir, "materiais_customizados.txt")
-        self.custom_materials = self.carregar_lista_materiais()
-        self.todos_materiais = ["A36 Comum", "A36 GE", "A36 GF"] + self.custom_materials + ["Ar Livre"]
+        # Gerenciamento de materiais (Banco de dados JSON)
+        self.arquivo_materiais_config = os.path.join(self.base_dir, "materiais_cadastrados.json")
+        self.arquivo_materiais_txt_legacy = os.path.join(self.base_dir, "materiais_customizados.txt")
+        self.default_materials = ["A36 Comum", "A36 GE", "A36 GF", "Estrutura Torre", "Ar Livre"]
+        self.custom_materials = []
+        self.todos_materiais = self.carregar_lista_materiais()
         self.radio_buttons_material = {}
         self.val_radio_buttons_material = {}
         self.filter_checkboxes_material = {}
@@ -1292,6 +1300,333 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.plot_diag_scatter.setLabel('left', 'AUC')
         self.plot_diag_scatter.setLabel('bottom', 'Tau', 'us')
         
+        # =====================================================================
+        # ABA 5: Caracterização & Comparação de Bobinas (Lift-Off)
+        # =====================================================================
+        self.tab_coil_char = QtWidgets.QWidget()
+        self.tab_widget.addTab(self.tab_coil_char, "Caracterização & Comparação de Bobinas")
+        tab_coil_layout = QtWidgets.QHBoxLayout(self.tab_coil_char)
+
+        # Sub-painel Esquerdo: Especificações e Controles (Scroll Area)
+        coil_left = QtWidgets.QWidget()
+        coil_left.setMaximumWidth(420)
+        coil_left.setMinimumWidth(380)
+        coil_left_layout = QtWidgets.QVBoxLayout(coil_left)
+        coil_left_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll_coil = QtWidgets.QScrollArea()
+        scroll_coil.setWidgetResizable(True)
+        scroll_coil.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        scroll_coil.setStyleSheet("background-color: #1e1e1e; border: none;")
+        
+        scroll_coil_content = QtWidgets.QWidget()
+        scroll_coil_layout = QtWidgets.QVBoxLayout(scroll_coil_content)
+        scroll_coil_layout.setContentsMargins(8, 8, 8, 8)
+        scroll_coil_layout.setSpacing(12)
+
+        # 1. Seleção e Cadastro de Bobinas / Sensores
+        group_coil_select = QtWidgets.QGroupBox("Seleção do Sensor / Bobina")
+        group_coil_select.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #3a3a3c;
+                border-radius: 4px;
+                margin-top: 12px;
+                font-weight: bold;
+                color: #29b6f6;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 3px;
+            }
+        """)
+        group_coil_select_layout = QtWidgets.QVBoxLayout(group_coil_select)
+        group_coil_select_layout.setSpacing(8)
+
+        # Botão para abrir a caixa de diálogo de cadastro/edição
+        self.btn_open_coil_dialog = QtWidgets.QPushButton("⚙️ Cadastrar / Editar Sensores")
+        self.btn_open_coil_dialog.setMinimumHeight(35)
+        self.btn_open_coil_dialog.setStyleSheet("background-color: #29b6f6; color: #000000; font-weight: bold;")
+        self.btn_open_coil_dialog.clicked.connect(self.abrir_dialogo_cadastro_bobina)
+        group_coil_select_layout.addWidget(self.btn_open_coil_dialog)
+
+        # Container para os Radio Buttons (Bullet Points) dos sensores
+        self.layout_radio_bobinas = QtWidgets.QVBoxLayout()
+        self.layout_radio_bobinas.setSpacing(4)
+        self.group_radio_bobinas = QtWidgets.QButtonGroup(self)
+        
+        group_coil_select_layout.addLayout(self.layout_radio_bobinas)
+        scroll_coil_layout.addWidget(group_coil_select)
+
+        # 2. Exibição das Características do Sensor Selecionado (Card no Canto Esquerdo)
+        group_coil_card = QtWidgets.QGroupBox("Características do Sensor Selecionado")
+        group_coil_card.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #3a3a3c;
+                border-radius: 4px;
+                margin-top: 12px;
+                font-weight: bold;
+                color: #00e676;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 3px;
+            }
+        """)
+        coil_card_layout = QtWidgets.QVBoxLayout(group_coil_card)
+        self.txt_coil_specs_card = QtWidgets.QTextEdit()
+        self.txt_coil_specs_card.setReadOnly(True)
+        self.txt_coil_specs_card.setMinimumHeight(160)
+        self.txt_coil_specs_card.setStyleSheet("""
+            QTextEdit {
+                background-color: #121214;
+                color: #00ff00;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9.5pt;
+                border: 1px solid #2a2a2e;
+                border-radius: 4px;
+                padding: 6px;
+            }
+        """)
+        coil_card_layout.addWidget(self.txt_coil_specs_card)
+        scroll_coil_layout.addWidget(group_coil_card)
+
+        # 2. Calculadora e Condições de Ensaio (Lift-Off & Amostra)
+        group_coil_env = QtWidgets.QGroupBox("Calculadora de Lift-Off (Espaçadores & Berço)")
+        group_coil_env.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #3a3a3c;
+                border-radius: 4px;
+                margin-top: 12px;
+                font-weight: bold;
+                color: #ab47bc;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 3px;
+            }
+        """)
+        coil_env_layout = QtWidgets.QVBoxLayout(group_coil_env)
+        coil_env_layout.setSpacing(8)
+
+        coil_env_form = QtWidgets.QFormLayout()
+        coil_env_form.setSpacing(6)
+
+        # Seleção da Base Berço
+        self.combo_berco_modelo = QtWidgets.QComboBox()
+        self.combo_berco_modelo.addItems([
+            "Base Maior (74.6 x 104.6 mm | H=2.6 mm)",
+            "Base Menor (52.5 x 74.5 mm | H=2.6 mm)"
+        ])
+        self.combo_berco_modelo.currentIndexChanged.connect(self.calcular_liftoff_bancada)
+        coil_env_form.addRow("Modelo do Berço:", self.combo_berco_modelo)
+
+        # Seleção de Espaçadores Empilhados via Listas Suspensas (QComboBox)
+        layout_spacers = QtWidgets.QGridLayout()
+        layout_spacers.setSpacing(4)
+
+        self.combo_espacador_5mm = QtWidgets.QComboBox()
+        self.combo_espacador_5mm.addItems(["0", "1", "2", "3", "4"])
+        self.combo_espacador_5mm.currentIndexChanged.connect(self.calcular_liftoff_bancada)
+
+        self.combo_espacador_4mm = QtWidgets.QComboBox()
+        self.combo_espacador_4mm.addItems(["0", "1", "2", "3", "4"])
+        self.combo_espacador_4mm.currentIndexChanged.connect(self.calcular_liftoff_bancada)
+
+        self.combo_espacador_2mm = QtWidgets.QComboBox()
+        self.combo_espacador_2mm.addItems(["0", "1", "2", "3", "4"])
+        self.combo_espacador_2mm.currentIndexChanged.connect(self.calcular_liftoff_bancada)
+
+        self.combo_espacador_1mm = QtWidgets.QComboBox()
+        self.combo_espacador_1mm.addItems(["0", "1", "2", "3", "4"])
+        self.combo_espacador_1mm.currentIndexChanged.connect(self.calcular_liftoff_bancada)
+
+        layout_spacers.addWidget(QtWidgets.QLabel("5mm:"), 0, 0)
+        layout_spacers.addWidget(self.combo_espacador_5mm, 0, 1)
+        layout_spacers.addWidget(QtWidgets.QLabel("4mm:"), 0, 2)
+        layout_spacers.addWidget(self.combo_espacador_4mm, 0, 3)
+
+        layout_spacers.addWidget(QtWidgets.QLabel("2mm:"), 1, 0)
+        layout_spacers.addWidget(self.combo_espacador_2mm, 1, 1)
+        layout_spacers.addWidget(QtWidgets.QLabel("1mm:"), 1, 2)
+        layout_spacers.addWidget(self.combo_espacador_1mm, 1, 3)
+
+        coil_env_form.addRow("Espaçadores (Qtd):", layout_spacers)
+
+        # Distância Resultante (Calculada e Editável)
+        self.spin_liftoff_dist = QtWidgets.QDoubleSpinBox()
+        self.spin_liftoff_dist.setRange(0.0, 100.0)
+        self.spin_liftoff_dist.setSingleStep(0.5)
+        self.spin_liftoff_dist.setSuffix(" mm")
+        self.spin_liftoff_dist.setValue(0.0)
+        coil_env_form.addRow("Distância Lift-Off (d):", self.spin_liftoff_dist)
+
+        self.combo_coil_material = QtWidgets.QComboBox()
+        self.combo_coil_material.addItems(["Ar Livre", "A36 Comum", "A36 GE", "A36 GF"])
+        coil_env_form.addRow("Cupom / Material:", self.combo_coil_material)
+
+        self.combo_coil_classe = QtWidgets.QComboBox()
+        self.combo_coil_classe.addItems(["Ar Livre", "Saudável", "Leve", "Moderada", "Avançada", "Corroído"])
+        coil_env_form.addRow("Estado de Corrosão:", self.combo_coil_classe)
+
+        self.edit_coil_sample_id = QtWidgets.QLineEdit("1")
+        coil_env_form.addRow("ID da Amostra:", self.edit_coil_sample_id)
+
+        coil_env_layout.addLayout(coil_env_form)
+
+        # Label com equação do cálculo automático de Lift-Off
+        self.lbl_calculo_liftoff_info = QtWidgets.QLabel("Fórmula: d = (Espaçadores + 2.6 mm) - H_bobina")
+        self.lbl_calculo_liftoff_info.setStyleSheet("color: #f1c40f; font-size: 8.5pt; font-family: monospace;")
+        coil_env_layout.addWidget(self.lbl_calculo_liftoff_info)
+
+        scroll_coil_layout.addWidget(group_coil_env)
+
+        # 3. Botões de Gravação e Gerenciamento
+        group_coil_actions = QtWidgets.QGroupBox("Ações & Gravação de Testes")
+        group_coil_actions.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #3a3a3c;
+                border-radius: 4px;
+                margin-top: 12px;
+                font-weight: bold;
+                color: #e1e1e6;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 3px;
+            }
+        """)
+        coil_actions_layout = QtWidgets.QVBoxLayout(group_coil_actions)
+        coil_actions_layout.setSpacing(8)
+
+        coil_sample_count_layout = QtWidgets.QFormLayout()
+        self.combo_num_amostras_caracterizacao = QtWidgets.QComboBox()
+        self.combo_num_amostras_caracterizacao.addItems([
+            "1 Amostra (Instantânea)",
+            "10 Amostras no mesmo CSV",
+            "100 Amostras no mesmo CSV",
+            "1000 Amostras no mesmo CSV"
+        ])
+        coil_sample_count_layout.addRow("Qtd Amostras/Arquivo:", self.combo_num_amostras_caracterizacao)
+        coil_actions_layout.addLayout(coil_sample_count_layout)
+
+        self.btn_record_coil_test = QtWidgets.QPushButton("Gravar Ensaio de Caracterização")
+        self.btn_record_coil_test.setMinimumHeight(45)
+        self.btn_record_coil_test.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 10pt;")
+        self.btn_record_coil_test.clicked.connect(self.gravar_ensaio_caracterizacao)
+        coil_actions_layout.addWidget(self.btn_record_coil_test)
+
+        self.btn_import_coil_csvs = QtWidgets.QPushButton("Importar Testes CSV")
+        self.btn_import_coil_csvs.setMinimumHeight(38)
+        self.btn_import_coil_csvs.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold; font-size: 10pt;")
+        self.btn_import_coil_csvs.clicked.connect(self.importar_csvs_caracterizacao)
+        coil_actions_layout.addWidget(self.btn_import_coil_csvs)
+
+        self.btn_clear_coil_comparison = QtWidgets.QPushButton("Limpar Seleção / Gráficos")
+        self.btn_clear_coil_comparison.setMinimumHeight(35)
+        self.btn_clear_coil_comparison.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
+        self.btn_clear_coil_comparison.clicked.connect(self.limpar_comparacao_bobinas)
+        coil_actions_layout.addWidget(self.btn_clear_coil_comparison)
+
+        self.btn_plot_3d_coils = QtWidgets.QPushButton("📊 Visualizar Gráfico 3D (L x AUC x Distância)")
+        self.btn_plot_3d_coils.setMinimumHeight(40)
+        self.btn_plot_3d_coils.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; font-size: 10pt;")
+        self.btn_plot_3d_coils.clicked.connect(self.abrir_grafico_3d_caracterizacao)
+        coil_actions_layout.addWidget(self.btn_plot_3d_coils)
+
+        self.btn_export_coil_report = QtWidgets.QPushButton("Exportar Comparativo (PNG/HTML)")
+        self.btn_export_coil_report.setMinimumHeight(35)
+        self.btn_export_coil_report.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+        self.btn_export_coil_report.clicked.connect(self.exportar_relatorio_bobinas)
+        coil_actions_layout.addWidget(self.btn_export_coil_report)
+
+        scroll_coil_layout.addWidget(group_coil_actions)
+
+        # 4. Lista de Arquivos de Teste Ativos
+        group_coil_files = QtWidgets.QGroupBox("Arquivos de Teste Importados")
+        group_coil_files.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #3a3a3c;
+                border-radius: 4px;
+                margin-top: 12px;
+                font-weight: bold;
+                color: #00e676;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 3px;
+            }
+        """)
+        coil_files_layout = QtWidgets.QVBoxLayout(group_coil_files)
+        self.list_imported_coil_files = QtWidgets.QListWidget()
+        self.list_imported_coil_files.setStyleSheet("background-color: #121214; color: #e1e1e6; font-size: 9pt;")
+        self.list_imported_coil_files.itemSelectionChanged.connect(self.atualizar_graficos_comparacao_bobinas)
+        coil_files_layout.addWidget(self.list_imported_coil_files)
+
+        scroll_coil_layout.addWidget(group_coil_files)
+
+        scroll_coil.setWidget(scroll_coil_content)
+        coil_left_layout.addWidget(scroll_coil)
+        tab_coil_layout.addWidget(coil_left)
+
+        # Sub-painel Direito: Gráficos Comparativos e Console Técnico
+        coil_right = QtWidgets.QWidget()
+        coil_right_layout = QtWidgets.QVBoxLayout(coil_right)
+        coil_right_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.win_coil_plots = pg.GraphicsLayoutWidget()
+        self.win_coil_plots.setBackground('#121214')
+        self.win_coil_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_grafico_caracterizacao)
+
+        # Subplot 1: Decaimento V(t)
+        self.plot_coil_decay = self.win_coil_plots.addPlot(row=0, col=0, title="Decaimento Transiente Comparativo V(t)")
+        self.plot_coil_decay.setLabel('left', 'Tensão / ADC Counts')
+        self.plot_coil_decay.setLabel('bottom', 'Tempo (us)')
+        self.plot_coil_decay.showGrid(x=True, y=True, alpha=0.3)
+
+        # Subplot 2: Tau vs Distância
+        self.plot_coil_tau_liftoff = self.win_coil_plots.addPlot(row=0, col=1, title="Constante de Tempo (Tau) vs Distância (Lift-Off)")
+        self.plot_coil_tau_liftoff.setLabel('left', 'Tau (us)')
+        self.plot_coil_tau_liftoff.setLabel('bottom', 'Distância (mm)')
+        self.plot_coil_tau_liftoff.showGrid(x=True, y=True, alpha=0.3)
+
+        # Subplot 3: AUC vs Distância
+        self.plot_coil_auc_liftoff = self.win_coil_plots.addPlot(row=1, col=0, title="Área Sob a Curva (AUC) vs Distância (Lift-Off)")
+        self.plot_coil_auc_liftoff.setLabel('left', 'AUC (Counts.us)')
+        self.plot_coil_auc_liftoff.setLabel('bottom', 'Distância (mm)')
+        self.plot_coil_auc_liftoff.showGrid(x=True, y=True, alpha=0.3)
+
+        # Subplot 4: Indutância Efetiva L vs Distância
+        self.plot_coil_l_liftoff = self.win_coil_plots.addPlot(row=1, col=1, title="Indutância Efetiva L vs Distância (Lift-Off)")
+        self.plot_coil_l_liftoff.setLabel('left', 'Indutância L (uH)')
+        self.plot_coil_l_liftoff.setLabel('bottom', 'Distância (mm)')
+        self.plot_coil_l_liftoff.showGrid(x=True, y=True, alpha=0.3)
+
+        coil_right_layout.addWidget(self.win_coil_plots, 2)
+
+        # Console de Resumo Técnico de Comparação
+        self.txt_coil_report = QtWidgets.QTextEdit()
+        self.txt_coil_report.setReadOnly(True)
+        self.txt_coil_report.setMaximumHeight(180)
+        self.txt_coil_report.setStyleSheet("""
+            QTextEdit {
+                background-color: #0c0c0d;
+                color: #00ff00;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9.5pt;
+                border: 1px solid #3a3a3c;
+                border-radius: 4px;
+                padding: 6px;
+            }
+        """)
+        coil_right_layout.addWidget(self.txt_coil_report, 1)
+
+        tab_coil_layout.addWidget(coil_right)
+
         # Conecta sinal de mudança de aba para carregar/atualizar os gráficos da Aba 4
         self.tab_widget.currentChanged.connect(self.ao_mudar_aba)
         
@@ -1301,8 +1636,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.diag_active_auc_line = None
         self.diag_active_tau_line = None
         
-        # Reconstrói a lista dinâmica de materiais no início
+        # Reconstrói a lista dinâmica de materiais e de bobinas no início
         self.atualizar_widgets_materiais()
+        self.atualizar_lista_radio_bobinas()
 
     def ajustar_viewbox_secundaria(self):
         # Ajusta a escala da ViewBox secundária (AUC) para coincidir com o tamanho do gráfico
@@ -1840,6 +2176,17 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         self.last_valores = valores_processados
         self.recent_curves.append(valores_processados)
+
+        # Coleta de multi-amostras em tempo real para a 5ª Aba (Caracterização de Bobinas)
+        if getattr(self, 'is_recording_coil_multisample', False):
+            self.coil_recording_buffer.append(list(valores_processados))
+            cur_count = len(self.coil_recording_buffer)
+            target_count = self.coil_recording_target_n
+            self.btn_record_coil_test.setText(f"⏳ Coletando ({cur_count} / {target_count} amostras)...")
+            
+            if cur_count >= target_count:
+                self.is_recording_coil_multisample = False
+                self.finalizar_gravacao_multiamostras_caracterizacao()
         
         # Determina a curva a ser usada para a IA e o cálculo dos gráficos de decaimento (média móvel temporal se ativada)
         if self.chk_salvar_media_movel.isChecked() and len(self.recent_curves) > 0:
@@ -2833,21 +3180,57 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 self.tooltip_estatistico.hide()
 
     def carregar_lista_materiais(self):
+        materiais = list(self.default_materials)
+
+        # 1. Tenta carregar do banco JSON
         if os.path.exists(self.arquivo_materiais_config):
             try:
                 with open(self.arquivo_materiais_config, "r", encoding="utf-8") as f:
-                    return [line.strip() for line in f if line.strip()]
+                    content = f.read().strip()
+                    if content:
+                        data = json.loads(content)
+                        if isinstance(data, list) and len(data) > 0:
+                            materiais = data
             except Exception as e:
-                print(f"[MATERIAIS] Erro ao ler materiais customizados: {e}")
-        return []
+                materiais = list(self.default_materials)
+
+        # 2. Migração legada do .txt se existir
+        if os.path.exists(self.arquivo_materiais_txt_legacy):
+            try:
+                with open(self.arquivo_materiais_txt_legacy, "r", encoding="utf-8") as f:
+                    legacy_items = [line.strip() for line in f if line.strip()]
+                    for item in legacy_items:
+                        if item not in materiais:
+                            materiais.append(item)
+            except Exception:
+                pass
+
+        # 3. Garante presença dos materiais padrão
+        for mat in self.default_materials:
+            if mat not in materiais:
+                if mat == "Ar Livre":
+                    materiais.append(mat)
+                else:
+                    idx = materiais.index("Ar Livre") if "Ar Livre" in materiais else len(materiais)
+                    materiais.insert(idx, mat)
+
+        self.custom_materials = [m for m in materiais if m not in self.default_materials]
+        
+        # Salva o JSON atualizado
+        try:
+            with open(self.arquivo_materiais_config, "w", encoding="utf-8") as f:
+                json.dump(materiais, f, indent=4, ensure_ascii=False)
+        except Exception:
+            pass
+
+        return materiais
 
     def salvar_lista_materiais(self):
         try:
             with open(self.arquivo_materiais_config, "w", encoding="utf-8") as f:
-                for mat in self.custom_materials:
-                    f.write(f"{mat}\n")
+                json.dump(self.todos_materiais, f, indent=4, ensure_ascii=False)
         except Exception as e:
-            print(f"[MATERIAIS] Erro ao salvar materiais customizados: {e}")
+            print(f"[MATERIAIS] Erro ao salvar materiais_cadastrados.json: {e}")
 
     def adicionar_material_customizado(self):
         novo_nome = self.edit_novo_material.text().strip()
@@ -2859,11 +3242,19 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             QtWidgets.QMessageBox.warning(self, "Caracter Inválido", "O nome do material não pode conter ponto e vírgula ';' ou quebras de linha!")
             return
             
-        if novo_nome in ["A36 Comum", "A36 GE", "A36 GF", "Ar Livre"] or novo_nome in self.custom_materials:
+        if novo_nome in self.todos_materiais:
             QtWidgets.QMessageBox.warning(self, "Material Existente", f"O material '{novo_nome}' já existe na interface!")
             return
             
-        self.custom_materials.append(novo_nome)
+        if "Ar Livre" in self.todos_materiais:
+            idx = self.todos_materiais.index("Ar Livre")
+            self.todos_materiais.insert(idx, novo_nome)
+        else:
+            self.todos_materiais.append(novo_nome)
+
+        if novo_nome not in self.default_materials and novo_nome not in self.custom_materials:
+            self.custom_materials.append(novo_nome)
+
         self.salvar_lista_materiais()
         self.atualizar_widgets_materiais()
         self.edit_novo_material.clear()
@@ -2875,8 +3266,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
     def remover_material_selecionado(self):
         material_a_remover = self.obter_material_e_classe_selecionados()[0]
-        if material_a_remover in ["A36 Comum", "A36 GE", "A36 GF", "Ar Livre"]:
-            QtWidgets.QMessageBox.warning(self, "Ação Proibida", "Não é permitido excluir os materiais padrão do sistema.")
+        if material_a_remover in self.default_materials:
+            QtWidgets.QMessageBox.warning(self, "Ação Proibida", f"Não é permitido excluir os materiais padrão do sistema ({', '.join(self.default_materials)}).")
             return
             
         resposta = QtWidgets.QMessageBox.question(
@@ -2886,16 +3277,26 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
         )
         if resposta == QtWidgets.QMessageBox.Yes:
+            if material_a_remover in self.todos_materiais:
+                self.todos_materiais.remove(material_a_remover)
             if material_a_remover in self.custom_materials:
                 self.custom_materials.remove(material_a_remover)
-                self.salvar_lista_materiais()
-                self.atualizar_widgets_materiais()
+            self.salvar_lista_materiais()
+            self.atualizar_widgets_materiais()
+            if "A36 Comum" in self.radio_buttons_material:
                 self.radio_buttons_material["A36 Comum"].setChecked(True)
-                QtWidgets.QMessageBox.information(self, "Sucesso", f"Material '{material_a_remover}' removido!")
+            QtWidgets.QMessageBox.information(self, "Sucesso", f"Material '{material_a_remover}' removido!")
 
     def atualizar_widgets_materiais(self):
-        self.todos_materiais = ["A36 Comum", "A36 GE", "A36 GF"] + self.custom_materials + ["Ar Livre"]
-        
+        # Garantia de integridade da lista
+        for mat in self.default_materials:
+            if mat not in self.todos_materiais:
+                if mat == "Ar Livre":
+                    self.todos_materiais.append(mat)
+                else:
+                    idx = self.todos_materiais.index("Ar Livre") if "Ar Livre" in self.todos_materiais else len(self.todos_materiais)
+                    self.todos_materiais.insert(idx, mat)
+
         # --- ABA 1 (AQUISIÇÃO) ---
         while self.layout_mat_radios.count():
             child = self.layout_mat_radios.takeAt(0)
@@ -2967,6 +3368,17 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     
             if "A36 Comum" in self.val_radio_buttons_material:
                 self.val_radio_buttons_material["A36 Comum"].setChecked(True)
+
+        # --- ABA 5 (CARACTERIZAÇÃO & COMPARAÇÃO DE BOBINAS) ---
+        if hasattr(self, 'combo_coil_material'):
+            current_sel = self.combo_coil_material.currentText()
+            self.combo_coil_material.blockSignals(True)
+            self.combo_coil_material.clear()
+            self.combo_coil_material.addItems(self.todos_materiais)
+            idx = self.combo_coil_material.findText(current_sel)
+            if idx >= 0:
+                self.combo_coil_material.setCurrentIndex(idx)
+            self.combo_coil_material.blockSignals(False)
 
     def ao_toggle_ar_livre_val_material(self, checked):
         if checked:
@@ -3214,6 +3626,568 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+
+    # =====================================================================
+    # LÓGICA DA ABA 5: CARACTERIZAÇÃO E COMPARAÇÃO DE BOBINAS (LIFT-OFF)
+    # =====================================================================
+    def atualizar_lista_radio_bobinas(self):
+        """
+        Reconstrói os Radio Buttons (bullet points) para cada bobina cadastrada no coil_manager.
+        """
+        for i in reversed(range(self.layout_radio_bobinas.count())):
+            item = self.layout_radio_bobinas.takeAt(i)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for btn in list(self.group_radio_bobinas.buttons()):
+            self.group_radio_bobinas.removeButton(btn)
+
+        coils = self.coil_manager.get_all_coils()
+        if not coils:
+            return
+
+        sorted_ids = sorted(coils.keys())
+        first_btn = None
+        for cid in sorted_ids:
+            info = coils[cid]
+            label = f"ID {info['id']} ({info['inductance_uh']:.1f} uH | {info['core']})"
+            radio = QtWidgets.QRadioButton(label)
+            radio.setProperty("coil_id", cid)
+            radio.setStyleSheet("""
+                QRadioButton {
+                    color: #e1e1e6; font-size: 10pt; font-weight: bold; padding: 2px;
+                }
+                QRadioButton::indicator:checked {
+                    background-color: #29b6f6; border: 2px solid #ffffff; border-radius: 6px;
+                }
+            """)
+            radio.toggled.connect(self.ao_selecionar_radio_bobina)
+            self.layout_radio_bobinas.addWidget(radio)
+            self.group_radio_bobinas.addButton(radio)
+            if first_btn is None:
+                first_btn = radio
+
+        if first_btn:
+            first_btn.setChecked(True)
+
+    def ao_selecionar_radio_bobina(self):
+        checked_button = self.group_radio_bobinas.checkedButton()
+        if not checked_button:
+            return
+
+        cid = checked_button.property("coil_id")
+        info = self.coil_manager.get_coil_info(cid)
+        if not info:
+            return
+
+        self.active_coil_info = info
+        self.atualizar_card_especificacoes_bobina(info)
+        self.calcular_liftoff_bancada()
+
+    def calcular_liftoff_bancada(self, *args):
+        """
+        Calcula automaticamente a distância real de Lift-Off (d) baseada nas listas suspensas (QComboBox)
+        de espaçadores empilhados, na altura do piso do berço (2.6 mm) e na altura total da bobina ativa.
+        """
+        if not hasattr(self, 'combo_espacador_5mm'):
+            return
+
+        try:
+            q_5mm = int(self.combo_espacador_5mm.currentText())
+            q_4mm = int(self.combo_espacador_4mm.currentText())
+            q_2mm = int(self.combo_espacador_2mm.currentText())
+            q_1mm = int(self.combo_espacador_1mm.currentText())
+        except ValueError:
+            q_5mm, q_4mm, q_2mm, q_1mm = 0, 0, 0, 0
+
+        h_espacadores = (q_5mm * 5.0) + (q_4mm * 4.0) + (q_2mm * 2.0) + (q_1mm * 1.0)
+        
+        h_berco_piso = 2.6
+        h_total_berco = h_espacadores + h_berco_piso
+
+        h_bobina = 8.5
+        if hasattr(self, 'active_coil_info') and self.active_coil_info:
+            info = self.active_coil_info
+            h_bobina = info.get('height_mm', 8.5)
+            if h_bobina <= 0:
+                h_bobina = info.get('height_winding_mm', 8.5)
+
+        d_liftoff = max(0.0, h_total_berco - h_bobina)
+        self.spin_liftoff_dist.setValue(d_liftoff)
+
+        self.lbl_calculo_liftoff_info.setText(
+            f"Fórmula Bancada: ({h_espacadores:.1f}mm espac. + {h_berco_piso:.1f}mm piso) - {h_bobina:.1f}mm altura bobina = {d_liftoff:.1f} mm"
+        )
+
+    def atualizar_card_especificacoes_bobina(self, info):
+        d_wind = info.get('diameter_winding_mm', info['diameter_mm'])
+        h_wind = info.get('height_winding_mm', info['height_mm'])
+        card_txt = f"""==================================================
+📌 CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
+==================================================
+• Indutância Medida (L0):  {info['inductance_uh']:.2f} uH
+• Resistência Medida (R):  {info['resistance_ohm']:.2f} Ohm
+• Diâmetro Total / Enrol.:  {info['diameter_mm']:.1f} mm / {d_wind:.1f} mm
+• Altura Total / Enrol.:   {info['height_mm']:.1f} mm / {h_wind:.1f} mm
+• Nº de Espiras (N):        {info['turns']} voltas
+• Bitola do Fio (AWG):     {info['awg']} (Ø {info['wire_diameter_mm']:.3f} mm)
+• Material do Núcleo:      {info['core']}
+• Descrição / Notas:       {info.get('description', 'Sem notas.')}
+"""
+        self.txt_coil_specs_card.setText(card_txt)
+
+    def abrir_dialogo_cadastro_bobina(self):
+        checked_button = self.group_radio_bobinas.checkedButton()
+        current_id = checked_button.property("coil_id") if checked_button else None
+        
+        dialog = CoilRegistrationDialog(self.coil_manager, parent=self, initial_coil_id=current_id)
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            self.atualizar_lista_radio_bobinas()
+            self.atualizar_graficos_comparacao_bobinas()
+
+    def abrir_grafico_3d_caracterizacao(self):
+        """
+        Abre a caixa de diálogo modal com o gráfico 3D interativo: Indutância Efetiva x AUC x Distância.
+        """
+        selected_items = self.list_imported_coil_files.selectedItems()
+        selected_filenames = [item.text() for item in selected_items]
+        
+        recs = [rec for rec in self.loaded_coil_records if rec['filename'] in selected_filenames] if selected_filenames else self.loaded_coil_records
+
+        if not recs:
+            QtWidgets.QMessageBox.warning(
+                self, "Nenhum Teste Carregado",
+                "Por favor, grave ou importe testes em CSV na 5ª Aba para visualizar o gráfico 3D!"
+            )
+            return
+
+        dialog = Coil3DPlotDialog(records=recs, parent=self)
+        dialog.exec_()
+
+    def ao_mover_mouse_grafico_caracterizacao(self, pos):
+        """
+        Exibe balão tooltip detalhado ao passar o cursor sobre qualquer ponto nos gráficos da 5ª Aba.
+        """
+        if not hasattr(self, 'loaded_coil_records') or not self.loaded_coil_records:
+            if hasattr(self, 'tooltip_estatistico') and self.tooltip_estatistico.isVisible():
+                self.tooltip_estatistico.hide()
+            return
+
+        selected_items = self.list_imported_coil_files.selectedItems()
+        selected_filenames = [item.text() for item in selected_items]
+        records = [rec for rec in self.loaded_coil_records if rec['filename'] in selected_filenames] if selected_filenames else self.loaded_coil_records
+
+        if not records:
+            if hasattr(self, 'tooltip_estatistico') and self.tooltip_estatistico.isVisible():
+                self.tooltip_estatistico.hide()
+            return
+
+        plots = [
+            self.plot_coil_decay,
+            self.plot_coil_tau_liftoff,
+            self.plot_coil_auc_liftoff,
+            self.plot_coil_l_liftoff
+        ]
+
+        melhor_rec = None
+        melhor_sample_idx = None
+        menor_dist_px = float('inf')
+
+        for plot_item in plots:
+            vb = plot_item.vb
+            if vb.sceneBoundingRect().contains(pos):
+                for rec in records:
+                    all_t = rec.get("all_taus", [rec.get("tau", 0.0)])
+                    all_a = rec.get("all_aucs", [rec.get("auc", 0.0)])
+                    all_l = rec.get("all_l_efetivas", [rec.get("l_efetiva_uh", 0.0)])
+                    dist_v = rec.get("distancia_mm", 0.0)
+
+                    # Testar pontos individuais
+                    for idx_sample in range(len(all_t)):
+                        if plot_item == self.plot_coil_tau_liftoff:
+                            pt_x, pt_y = dist_v, all_t[idx_sample]
+                        elif plot_item == self.plot_coil_auc_liftoff:
+                            pt_x, pt_y = dist_v, all_a[idx_sample]
+                        elif plot_item == self.plot_coil_l_liftoff:
+                            pt_x, pt_y = dist_v, all_l[idx_sample]
+                        else:
+                            continue
+
+                        pt_pixel = vb.mapViewToScene(pg.Point(pt_x, pt_y))
+                        dx = pos.x() - pt_pixel.x()
+                        dy = pos.y() - pt_pixel.y()
+                        dist_px = np.hypot(dx, dy)
+
+                        if dist_px < 22 and dist_px < menor_dist_px:
+                            menor_dist_px = dist_px
+                            melhor_rec = rec
+                            melhor_sample_idx = idx_sample
+                break
+
+        if melhor_rec:
+            n_tot = melhor_rec.get("num_samples", 1)
+            if melhor_sample_idx is not None and n_tot > 1:
+                tau_pt = melhor_rec.get("all_taus", [melhor_rec["tau"]])[melhor_sample_idx]
+                auc_pt = melhor_rec.get("all_aucs", [melhor_rec["auc"]])[melhor_sample_idx]
+                l_pt = melhor_rec.get("all_l_efetivas", [melhor_rec["l_efetiva_uh"]])[melhor_sample_idx]
+                sample_str = f"{melhor_rec['id_amostra']} (Amostra {melhor_sample_idx+1}/{n_tot})"
+            else:
+                tau_pt = melhor_rec["tau"]
+                auc_pt = melhor_rec["auc"]
+                l_pt = melhor_rec["l_efetiva_uh"]
+                sample_str = f"{melhor_rec['id_amostra']}"
+
+            tooltip_text = (
+                f"📁 <b>Arquivo:</b> {melhor_rec['filename']}<br>"
+                f"🆔 <b>Amostra:</b> {sample_str}<br>"
+                f"🧲 <b>Bobina:</b> ID {melhor_rec['id_bobina']} ({melhor_rec['indutancia_uh']:.1f} &mu;H)<br>"
+                f"🛡️ <b>Material:</b> {melhor_rec['material']}<br>"
+                f"📊 <b>Estado:</b> {melhor_rec['classe'].capitalize()}<br>"
+                f"📏 <b>Distância (Lift-Off):</b> {melhor_rec['distancia_mm']:.2f} mm<br>"
+                f"⏱️ <b>Tau (&tau;):</b> {tau_pt:.4f} &mu;s<br>"
+                f"📐 <b>AUC:</b> {auc_pt:.1f} Counts.&mu;s<br>"
+                f"⚡ <b>L Efetiva:</b> {l_pt:.2f} &mu;H"
+            )
+            if n_tot > 1:
+                tooltip_text += f"<br>📊 <b>Total no CSV:</b> N={n_tot} (Média &tau;: {melhor_rec['tau']:.4f} &mu;s)"
+
+            self.tooltip_estatistico.setText(tooltip_text)
+            self.tooltip_estatistico.adjustSize()
+            
+            widget_pos = self.win_coil_plots.mapFromScene(pos)
+            parent_pos = self.win_coil_plots.mapTo(self, widget_pos)
+            self.tooltip_estatistico.move(parent_pos.x() + 15, parent_pos.y() + 15)
+            
+            if not self.tooltip_estatistico.isVisible():
+                self.tooltip_estatistico.show()
+                self.tooltip_estatistico.raise_()
+        else:
+            if hasattr(self, 'tooltip_estatistico') and self.tooltip_estatistico.isVisible():
+                self.tooltip_estatistico.hide()
+
+    def obter_especificacoes_bobina_atuais(self):
+        if hasattr(self, 'active_coil_info') and self.active_coil_info:
+            return self.active_coil_info
+        coils = self.coil_manager.get_all_coils()
+        if coils:
+            return list(coils.values())[0]
+        return self.coil_manager.register_coil("681", 660.9, 2.2, 14.7, 8.5, 150, "27", 0.361, "PLA")
+
+    def gravar_ensaio_caracterizacao(self):
+        if self.last_valores is None or len(self.last_valores) < 60:
+            QtWidgets.QMessageBox.warning(self, "Sem Dados", "Não há curva capturada para gravar! Inicie a leitura primeiro.")
+            return
+
+        coil_info = self.obter_especificacoes_bobina_atuais()
+        dist_mm = self.spin_liftoff_dist.value()
+        material = self.combo_coil_material.currentText()
+        classe = self.combo_coil_classe.currentText()
+        sample_id = self.edit_coil_sample_id.text().strip()
+
+        target_n_str = self.combo_num_amostras_caracterizacao.currentText()
+        target_n = 1
+        if "1000" in target_n_str:
+            target_n = 1000
+        elif "100" in target_n_str:
+            target_n = 100
+        elif "10" in target_n_str:
+            target_n = 10
+
+        if target_n == 1:
+            try:
+                filepath = self.coil_manager.save_characterization_record(
+                    output_dir=self.caracterizacao_dir,
+                    id_amostra=sample_id,
+                    coil_info=coil_info,
+                    distance_mm=dist_mm,
+                    material=material,
+                    classe=classe,
+                    dt_us=self.dt_us,
+                    curves=list(self.last_valores)
+                )
+
+                rec = self.coil_manager.read_characterization_csv(filepath)
+                if rec:
+                    self.loaded_coil_records.append(rec)
+                    item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['classe']}) [N=1] - {rec['filename']}"
+                    item = QtWidgets.QListWidgetItem(item_text)
+                    item.setData(QtCore.Qt.UserRole, rec)
+                    item.setSelected(True)
+                    self.list_imported_coil_files.addItem(item)
+                    self.atualizar_graficos_comparacao_bobinas()
+
+                QtWidgets.QMessageBox.information(
+                    self, "Ensaio Gravado",
+                    f"Ensaio de caracterização com 1 amostra gravado com sucesso!\n\nArquivo:\n{os.path.basename(filepath)}"
+                )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Erro ao Gravar", f"Erro ao gravar arquivo de caracterização: {e}")
+        else:
+            if self.leitura_ativa:
+                self.coil_recording_target_n = target_n
+                self.coil_recording_buffer = []
+                self.coil_recording_sample_id = sample_id
+                self.coil_recording_coil_info = coil_info
+                self.coil_recording_dist_mm = dist_mm
+                self.coil_recording_material = material
+                self.coil_recording_classe = classe
+                self.is_recording_coil_multisample = True
+                
+                self.btn_record_coil_test.setEnabled(False)
+                self.btn_record_coil_test.setText(f"⏳ Coletando (0 / {target_n} amostras)...")
+            else:
+                avail_curves = list(self.recent_curves)
+                if not avail_curves:
+                    QtWidgets.QMessageBox.warning(
+                        self, "Leitura Inativa",
+                        f"Para coletar {target_n} amostras em tempo real, inicie a leitura serial contínua!"
+                    )
+                    return
+                
+                curves_to_save = [avail_curves[i % len(avail_curves)] for i in range(target_n)]
+                filepath = self.coil_manager.save_characterization_record(
+                    output_dir=self.caracterizacao_dir,
+                    id_amostra=sample_id,
+                    coil_info=coil_info,
+                    distance_mm=dist_mm,
+                    material=material,
+                    classe=classe,
+                    dt_us=self.dt_us,
+                    curves=curves_to_save
+                )
+
+                rec = self.coil_manager.read_characterization_csv(filepath)
+                if rec:
+                    self.loaded_coil_records.append(rec)
+                    item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['classe']}) [N={rec['num_samples']}] - {rec['filename']}"
+                    item = QtWidgets.QListWidgetItem(item_text)
+                    item.setData(QtCore.Qt.UserRole, rec)
+                    item.setSelected(True)
+                    self.list_imported_coil_files.addItem(item)
+                    self.atualizar_graficos_comparacao_bobinas()
+
+                QtWidgets.QMessageBox.information(
+                    self, "Ensaio Gravado",
+                    f"Ensaio de {target_n} amostras gravado com sucesso no mesmo arquivo CSV:\n{os.path.basename(filepath)}"
+                )
+
+    def finalizar_gravacao_multiamostras_caracterizacao(self):
+        try:
+            filepath = self.coil_manager.save_characterization_record(
+                output_dir=self.caracterizacao_dir,
+                id_amostra=self.coil_recording_sample_id,
+                coil_info=self.coil_recording_coil_info,
+                distance_mm=self.coil_recording_dist_mm,
+                material=self.coil_recording_material,
+                classe=self.coil_recording_classe,
+                dt_us=self.dt_us,
+                curves=self.coil_recording_buffer
+            )
+
+            rec = self.coil_manager.read_characterization_csv(filepath)
+            if rec:
+                self.loaded_coil_records.append(rec)
+                item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['classe']}) [N={rec['num_samples']}] - {rec['filename']}"
+                item = QtWidgets.QListWidgetItem(item_text)
+                item.setData(QtCore.Qt.UserRole, rec)
+                item.setSelected(True)
+                self.list_imported_coil_files.addItem(item)
+                self.atualizar_graficos_comparacao_bobinas()
+
+            QtWidgets.QMessageBox.information(
+                self, "Ensaio Gravado",
+                f"Ensaio de {len(self.coil_recording_buffer)} amostras gravado com sucesso no mesmo arquivo CSV:\n{os.path.basename(filepath)}"
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Erro ao Gravar", f"Erro ao gravar arquivo de caracterização: {e}")
+        finally:
+            self.btn_record_coil_test.setText("Gravar Ensaio de Caracterização")
+            self.btn_record_coil_test.setEnabled(True)
+            self.coil_recording_buffer = []
+
+    def importar_csvs_caracterizacao(self):
+        os.makedirs(self.caracterizacao_dir, exist_ok=True)
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self, "Importar Testes CSV de Caracterização",
+            self.caracterizacao_dir,
+            "Arquivos CSV (*.csv)"
+        )
+        if not files:
+            return
+
+        recs = self.coil_manager.read_multiple_csvs(files)
+        if not recs:
+            QtWidgets.QMessageBox.warning(self, "Importação Falhou", "Nenhum arquivo CSV válido de caracterização foi encontrado.")
+            return
+
+        count_added = 0
+        for rec in recs:
+            # Evita duplicatas pelo caminho do arquivo
+            if not any(r["filepath"] == rec["filepath"] for r in self.loaded_coil_records):
+                self.loaded_coil_records.append(rec)
+                item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['classe']}) - {rec['filename']}"
+                item = QtWidgets.QListWidgetItem(item_text)
+                item.setData(QtCore.Qt.UserRole, rec)
+                item.setSelected(True)
+                self.list_imported_coil_files.addItem(item)
+                count_added += 1
+
+        self.atualizar_graficos_comparacao_bobinas()
+        QtWidgets.QMessageBox.information(self, "Importação Concluída", f"{count_added} arquivo(s) carregado(s) com sucesso!")
+
+    def limpar_comparacao_bobinas(self):
+        self.loaded_coil_records.clear()
+        self.list_imported_coil_files.clear()
+        self.plot_coil_decay.clear()
+        self.plot_coil_tau_liftoff.clear()
+        self.plot_coil_auc_liftoff.clear()
+        self.plot_coil_l_liftoff.clear()
+        self.txt_coil_report.clear()
+        self.txt_coil_report.setText("Aguardando carregamento de ensaios para gerar relatório comparativo...")
+
+    def atualizar_graficos_comparacao_bobinas(self):
+        # Limpa plots
+        self.plot_coil_decay.clear()
+        self.plot_coil_tau_liftoff.clear()
+        self.plot_coil_auc_liftoff.clear()
+        self.plot_coil_l_liftoff.clear()
+
+        # Coleta itens selecionados na lista
+        selected_items = self.list_imported_coil_files.selectedItems()
+        recs_para_plotar = [item.data(QtCore.Qt.UserRole) for item in selected_items if item.data(QtCore.Qt.UserRole)]
+
+        if not recs_para_plotar:
+            recs_para_plotar = self.loaded_coil_records
+
+        if not recs_para_plotar:
+            self.txt_coil_report.setText("Nenhum registro selecionado.")
+            return
+
+        # Cores para curvas
+        paleta_cores = ["#00e676", "#29b6f6", "#ab47bc", "#ffca28", "#ff7043", "#ec407a", "#26a69a", "#78909c", "#e040fb", "#18ffff"]
+        
+        # 1. Plotar Curvas Transientes V(t)
+        for idx, rec in enumerate(recs_para_plotar):
+            cor = paleta_cores[idx % len(paleta_cores)]
+            t_us = np.arange(len(rec["curva"])) * rec["dt_us"]
+            label = f"B.{rec['id_bobina']} ({rec['distancia_mm']}mm, {rec['material']})"
+            
+            # Se o CSV possui multi-amostras, plota curvas individuais translúcidas de fundo
+            all_curves = rec.get("all_curves", [])
+            if len(all_curves) > 1:
+                pen_indiv = pg.mkPen(color=cor, width=0.7)
+                for single_c in all_curves:
+                    self.plot_coil_decay.plot(t_us, single_c, pen=pen_indiv)
+
+            # Plota curva média com linha em destaque
+            pen = pg.mkPen(color=cor, width=2.5)
+            self.plot_coil_decay.plot(t_us, rec["curva"], pen=pen, name=label)
+
+        # 2. Agrupar registros por (id_bobina, material, classe) para montar curvas de Lift-Off (vs distância)
+        grupos = {}
+        for rec in recs_para_plotar:
+            key = (rec["id_bobina"], rec["material"], rec["classe"])
+            if key not in grupos:
+                grupos[key] = []
+            grupos[key].append(rec)
+
+        relatorio_txt = ["==========================================================================",
+                         "RELATÓRIO DE CARACTERIZAÇÃO DE BOBINAS & ENSAIOS DE LIFT-OFF",
+                         "=========================================================================="]
+
+        for idx, (key, g_recs) in enumerate(grupos.items()):
+            # Ordena por distância crescente
+            g_recs_sorted = sorted(g_recs, key=lambda x: x["distancia_mm"])
+            dists = [r["distancia_mm"] for r in g_recs_sorted]
+            taus = [r["tau"] for r in g_recs_sorted]
+            aucs = [r["auc"] for r in g_recs_sorted]
+            l_efetivas = [r["l_efetiva_uh"] for r in g_recs_sorted]
+
+            cor = paleta_cores[idx % len(paleta_cores)]
+            pen_mean = pg.mkPen(color=cor, width=2.5, style=QtCore.Qt.DashLine)
+            symbol_pen = pg.mkPen(color=cor)
+
+            label = f"Bobina {key[0]} | {key[1]} ({key[2]})"
+
+            # 2.1 Plotar todos os pontos individuais de cada arquivo (Scatter Plot de Dispersão Total)
+            for r in g_recs_sorted:
+                d_val = r["distancia_mm"]
+                all_t = r.get("all_taus", [r["tau"]])
+                all_a = r.get("all_aucs", [r["auc"]])
+                all_l = r.get("all_l_efetivas", [r["l_efetiva_uh"]])
+
+                d_pts = [d_val] * len(all_t)
+                c_qcolor = QtGui.QColor(cor)
+                c_qcolor.setAlpha(130)
+                brush_scatter = pg.mkBrush(c_qcolor)
+
+                # Plota todos os pontos das amostras do CSV
+                self.plot_coil_tau_liftoff.plot(d_pts, all_t, pen=None, symbol='o', symbolSize=6, symbolBrush=brush_scatter, symbolPen=None)
+                self.plot_coil_auc_liftoff.plot(d_pts, all_a, pen=None, symbol='s', symbolSize=6, symbolBrush=brush_scatter, symbolPen=None)
+                self.plot_coil_l_liftoff.plot(d_pts, all_l, pen=None, symbol='d', symbolSize=6, symbolBrush=brush_scatter, symbolPen=None)
+
+            # 2.2 Plotar a linha média conectando as distâncias da série
+            self.plot_coil_tau_liftoff.plot(dists, taus, pen=pen_mean, symbol='o', symbolSize=9, symbolBrush=cor, symbolPen=symbol_pen, name=label)
+            self.plot_coil_auc_liftoff.plot(dists, aucs, pen=pen_mean, symbol='s', symbolSize=9, symbolBrush=cor, symbolPen=symbol_pen, name=label)
+            self.plot_coil_l_liftoff.plot(dists, l_efetivas, pen=pen_mean, symbol='d', symbolSize=9, symbolBrush=cor, symbolPen=symbol_pen, name=label)
+
+            # Gera dados para o console de relatório
+            relatorio_txt.append(f"\n>>> SERIE: Bobina {key[0]} | Material: {key[1]} | Classe: {key[2]}")
+            relatorio_txt.append(f"    {'Dist (mm)':<10} | {'Tau (us)':<12} | {'AUC (Counts.us)':<18} | {'L Efetiva (uH)':<14} | {'N Amostras':<10}")
+            relatorio_txt.append("    " + "-" * 72)
+            for r in g_recs_sorted:
+                n_str = f"N={r.get('num_samples', 1)}"
+                relatorio_txt.append(f"    {r['distancia_mm']:<10.1f} | {r['tau']:<12.4f} | {r['auc']:<18.1f} | {r['l_efetiva_uh']:<14.2f} | {n_str:<10}")
+
+            if len(dists) >= 2:
+                delta_d = dists[-1] - dists[0]
+                delta_tau = taus[-1] - taus[0]
+                sens = (delta_tau / delta_d) if delta_d > 0 else 0.0
+                relatorio_txt.append(f"    -> Sensibilidade dTau/dDist: {sens:+.4f} us/mm (na faixa {dists[0]}mm a {dists[-1]}mm)")
+
+        self.txt_coil_report.setText("\n".join(relatorio_txt))
+
+    def exportar_relatorio_bobinas(self):
+        if not self.loaded_coil_records:
+            QtWidgets.QMessageBox.warning(self, "Sem Dados", "Não há ensaios carregados para exportar o comparativo.")
+            return
+
+        dest_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "Selecionar Pasta para Exportação", self.base_dir)
+        if not dest_dir:
+            return
+
+        ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        img_path = os.path.join(dest_dir, f"comparativo_bobinas_{ts_str}.png")
+        html_path = os.path.join(dest_dir, f"relatorio_bobinas_{ts_str}.html")
+
+        try:
+            # Save PyQtGraph scene as image
+            exporter = pg.exporters.ImageExporter(self.win_coil_plots.scene())
+            exporter.export(img_path)
+
+            # Save HTML report
+            report_text = self.txt_coil_report.toPlainText().replace("\n", "<br>").replace(" ", "&nbsp;")
+            html_content = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Relatório Comparativo de Bobinas</title>
+<style>body {{ background: #1e1e1e; color: #e1e1e6; font-family: monospace; padding: 20px; }} h2 {{ color: #29b6f6; }}</style>
+</head>
+<body>
+<h2>📊 Relatório de Caracterização e Ensaios de Lift-Off</h2>
+<p>Data do Relatório: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+<img src="{os.path.basename(img_path)}" style="max-width:100%; border: 1px solid #3a3a3c;"><br><br>
+<div>{report_text}</div>
+</body>
+</html>"""
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+
+            QtWidgets.QMessageBox.information(
+                self, "Exportação Concluída",
+                f"Relatório exportado com sucesso!\n\nImagem: {os.path.basename(img_path)}\nHTML: {os.path.basename(html_path)}"
+            )
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Erro ao Exportar", f"Erro durante a exportação:\n{str(e)}")
 
 
 # =====================================================================
