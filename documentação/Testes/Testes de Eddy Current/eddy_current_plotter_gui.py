@@ -1500,10 +1500,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.chk_berco_maior.toggled.connect(self.calcular_liftoff_bancada)
         self.chk_berco_menor.toggled.connect(self.calcular_liftoff_bancada)
 
-        self.layout_berco_grid = QtWidgets.QGridLayout()
+        self.widget_berco_container = QtWidgets.QWidget()
+        self.layout_berco_grid = QtWidgets.QGridLayout(self.widget_berco_container)
+        self.layout_berco_grid.setContentsMargins(0, 0, 0, 0)
         self.layout_berco_grid.setSpacing(3)
         self.lista_widgets_berco = [self.chk_berco_maior, self.chk_berco_menor]
-        coil_env_form.addRow("Modelo do Berço:", self.layout_berco_grid)
+        for idx_b, chk_b in enumerate(self.lista_widgets_berco):
+            self.layout_berco_grid.addWidget(chk_b, idx_b // 3, idx_b % 3)
+
+        coil_env_form.addRow("Modelo do Berço:", self.widget_berco_container)
         coil_env_form.addRow(criar_linha_separadora())
 
         # Seleção de Espaçadores Empilhados via Checkboxes
@@ -1517,10 +1522,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.chk_espacador_2mm.toggled.connect(self.calcular_liftoff_bancada)
         self.chk_espacador_1mm.toggled.connect(self.calcular_liftoff_bancada)
 
-        self.layout_spacers_grid = QtWidgets.QGridLayout()
+        self.widget_spacers_container = QtWidgets.QWidget()
+        self.layout_spacers_grid = QtWidgets.QGridLayout(self.widget_spacers_container)
+        self.layout_spacers_grid.setContentsMargins(0, 0, 0, 0)
         self.layout_spacers_grid.setSpacing(4)
         self.lista_widgets_spacers = [self.chk_espacador_5mm, self.chk_espacador_4mm, self.chk_espacador_2mm, self.chk_espacador_1mm]
-        coil_env_form.addRow("Espaçadores:", self.layout_spacers_grid)
+        for idx_s, chk_s in enumerate(self.lista_widgets_spacers):
+            self.layout_spacers_grid.addWidget(chk_s, idx_s // 3, idx_s % 3)
+
+        coil_env_form.addRow("Espaçadores:", self.widget_spacers_container)
         coil_env_form.addRow(criar_linha_separadora())
 
         # Distância Resultante (Calculada e Editável)
@@ -1535,7 +1545,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Seleção de Material por Checkboxes (Exclusivos)
         self.chk_materiais = {}
         self.group_materiais = QtWidgets.QButtonGroup(self)
-        self.layout_mat_grid = QtWidgets.QGridLayout()
+        self.widget_mat_container = QtWidgets.QWidget()
+        self.layout_mat_grid = QtWidgets.QGridLayout(self.widget_mat_container)
+        self.layout_mat_grid.setContentsMargins(0, 0, 0, 0)
         self.layout_mat_grid.setSpacing(3)
         self.lista_widgets_materiais = []
 
@@ -1547,15 +1559,18 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.lista_widgets_materiais.append(chk)
             if idx_m == 0:
                 chk.setChecked(True)
+            self.layout_mat_grid.addWidget(chk, idx_m // 3, idx_m % 3)
 
-        coil_env_form.addRow("Cupom / Material:", self.layout_mat_grid)
+        coil_env_form.addRow("Cupom / Material:", self.widget_mat_container)
         self.group_materiais.buttonClicked.connect(self.ao_alterar_material_caracterizacao)
         coil_env_form.addRow(criar_linha_separadora())
 
         # Seleção de Estado de Corrosão por Checkboxes (Exclusivos)
         self.chk_classes = {}
         self.group_classes = QtWidgets.QButtonGroup(self)
-        self.layout_cls_grid = QtWidgets.QGridLayout()
+        self.widget_cls_container = QtWidgets.QWidget()
+        self.layout_cls_grid = QtWidgets.QGridLayout(self.widget_cls_container)
+        self.layout_cls_grid.setContentsMargins(0, 0, 0, 0)
         self.layout_cls_grid.setSpacing(3)
         self.lista_widgets_classes = []
 
@@ -1567,8 +1582,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.lista_widgets_classes.append(chk)
             if cls_nome == "Saudável":
                 chk.setChecked(True)
+            self.layout_cls_grid.addWidget(chk, idx_c // 3, idx_c % 3)
 
-        coil_env_form.addRow("Estado de Corrosão:", self.layout_cls_grid)
+        coil_env_form.addRow("Estado de Corrosão:", self.widget_cls_container)
         self.group_classes.buttonClicked.connect(self.ao_alterar_classe_caracterizacao)
         coil_env_form.addRow(criar_linha_separadora())
 
@@ -1579,15 +1595,18 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Checkboxes para Seleção do Local da Amostra
         self.chk_locais = {}
         locais_opcoes = ["São Paulo", "Ceara", "Venancio", "Caxias", "Rosario", "Senai", "Branco"]
-        self.layout_locais_grid = QtWidgets.QGridLayout()
+        self.widget_locais_container = QtWidgets.QWidget()
+        self.layout_locais_grid = QtWidgets.QGridLayout(self.widget_locais_container)
+        self.layout_locais_grid.setContentsMargins(0, 0, 0, 0)
         self.layout_locais_grid.setSpacing(3)
         self.lista_widgets_locais = []
         for idx_l, nome_l in enumerate(locais_opcoes):
             chk = QtWidgets.QCheckBox(nome_l)
             self.chk_locais[nome_l] = chk
             self.lista_widgets_locais.append(chk)
+            self.layout_locais_grid.addWidget(chk, idx_l // 3, idx_l % 3)
 
-        coil_env_form.addRow("Local da Amostra:", self.layout_locais_grid)
+        coil_env_form.addRow("Local da Amostra:", self.widget_locais_container)
 
         coil_env_layout.addLayout(coil_env_form)
 
@@ -4032,12 +4051,16 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         if not grid_layout or not widgets_list:
             return
         for i in reversed(range(grid_layout.count())):
-            grid_layout.takeAt(i)
+            item = grid_layout.takeAt(i)
+            if item and item.widget():
+                item.widget().hide()
 
         for idx, w in enumerate(widgets_list):
             r = idx // num_cols
             c = idx % num_cols
             grid_layout.addWidget(w, r, c)
+            w.setVisible(True)
+            w.show()
 
     def obter_num_colunas_seletores_atual(self):
         if hasattr(self, 'combo_num_colunas_painel'):
