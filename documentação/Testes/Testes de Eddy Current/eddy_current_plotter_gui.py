@@ -1520,6 +1520,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             layout_mat_grid.addWidget(chk, idx_m // 2, idx_m % 2)
 
         coil_env_form.addRow("Cupom / Material:", layout_mat_grid)
+        self.group_materiais.buttonClicked.connect(self.ao_alterar_material_caracterizacao)
 
         # Seleção de Estado de Corrosão por Checkboxes (Exclusivos)
         self.chk_classes = {}
@@ -1537,6 +1538,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             layout_cls_grid.addWidget(chk, idx_c // 2, idx_c % 2)
 
         coil_env_form.addRow("Estado de Corrosão:", layout_cls_grid)
+        self.group_classes.buttonClicked.connect(self.ao_alterar_classe_caracterizacao)
 
         self.edit_coil_sample_id = QtWidgets.QLineEdit("1")
         coil_env_form.addRow("ID da Amostra:", self.edit_coil_sample_id)
@@ -3995,6 +3997,54 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         if hasattr(self, 'group_classes') and self.group_classes.checkedButton():
             return self.group_classes.checkedButton().text()
         return "Saudável"
+
+    def ao_alterar_material_caracterizacao(self, button):
+        if not button or not button.isChecked():
+            return
+        mat_nome = button.text()
+        
+        if getattr(self, '_syncing_mat_cls', False):
+            return
+
+        self._syncing_mat_cls = True
+        try:
+            if mat_nome == "Ar Livre":
+                # Ao selecionar Ar Livre como material, a classe deve ser sempre Ar Livre
+                if "Ar Livre" in self.chk_classes:
+                    self.chk_classes["Ar Livre"].setChecked(True)
+            else:
+                # Ao selecionar um metal, o estado de corrosao NUNCA pode ser Ar Livre. Se estivesse Ar Livre, muda para Saudavel
+                classe_atual = self.obter_classe_selecionada()
+                if classe_atual == "Ar Livre":
+                    if "Saudável" in self.chk_classes:
+                        self.chk_classes["Saudável"].setChecked(True)
+        finally:
+            self._syncing_mat_cls = False
+
+    def ao_alterar_classe_caracterizacao(self, button):
+        if not button or not button.isChecked():
+            return
+        cls_nome = button.text()
+
+        if getattr(self, '_syncing_mat_cls', False):
+            return
+
+        self._syncing_mat_cls = True
+        try:
+            if cls_nome == "Ar Livre":
+                # Se o estado for Ar Livre, o material deve ser sempre Ar Livre
+                if "Ar Livre" in self.chk_materiais:
+                    self.chk_materiais["Ar Livre"].setChecked(True)
+            else:
+                # Se o estado for metalico (Saudavel, Leve, etc.), o material NUNCA pode ser Ar Livre
+                mat_atual = self.obter_material_selecionado()
+                if mat_atual == "Ar Livre":
+                    for m_nome, chk_m in self.chk_materiais.items():
+                        if m_nome != "Ar Livre":
+                            chk_m.setChecked(True)
+                            break
+        finally:
+            self._syncing_mat_cls = False
 
     def obter_locais_amostra_selecionados(self):
         locais_sel = [nome for nome, chk in getattr(self, 'chk_locais', {}).items() if chk.isChecked()]
