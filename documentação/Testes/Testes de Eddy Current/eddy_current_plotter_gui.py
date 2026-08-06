@@ -1305,12 +1305,42 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # =====================================================================
         self.tab_coil_char = QtWidgets.QWidget()
         self.tab_widget.addTab(self.tab_coil_char, "Caracterização & Comparação de Bobinas")
-        tab_coil_layout = QtWidgets.QHBoxLayout(self.tab_coil_char)
+        tab_coil_outer_layout = QtWidgets.QVBoxLayout(self.tab_coil_char)
+        tab_coil_outer_layout.setContentsMargins(4, 4, 4, 4)
+        tab_coil_outer_layout.setSpacing(4)
+
+        # Barra Superior de Controles da Aba 5 (Botão Esconder/Exibir Painel Lateral)
+        top_bar_tab5 = QtWidgets.QHBoxLayout()
+        self.btn_toggle_coil_left = QtWidgets.QPushButton("◀ Esconder Painel Lateral")
+        self.btn_toggle_coil_left.setMinimumHeight(28)
+        self.btn_toggle_coil_left.setStyleSheet("""
+            QPushButton {
+                background-color: #2c2c2e; color: #00e676; font-weight: bold; font-size: 8.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 4px 12px;
+            }
+            QPushButton:hover {
+                background-color: #3a3a3c; color: #ffffff;
+            }
+        """)
+        self.btn_toggle_coil_left.clicked.connect(self.toggle_painel_lateral_caracterizacao)
+        top_bar_tab5.addWidget(self.btn_toggle_coil_left)
+        top_bar_tab5.addStretch()
+        tab_coil_outer_layout.addLayout(top_bar_tab5)
+
+        # Splitter Horizontal para permitir ajustar a largura do menu lateral manualmente
+        self.splitter_tab_coil = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        self.splitter_tab_coil.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #3a3a3c;
+                width: 6px;
+            }
+            QSplitter::handle:hover {
+                background-color: #00e676;
+            }
+        """)
 
         # Sub-painel Esquerdo: Especificações e Controles (Scroll Area)
         coil_left = QtWidgets.QWidget()
-        coil_left.setMaximumWidth(420)
-        coil_left.setMinimumWidth(380)
+        coil_left.setMinimumWidth(240)
         coil_left_layout = QtWidgets.QVBoxLayout(coil_left)
         coil_left_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -1429,10 +1459,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         coil_env_form = QtWidgets.QFormLayout()
         coil_env_form.setSpacing(6)
 
-        # Seleção da Base Berço (Checkboxes Exclusivos)
+        # Seleção da Base Berço (Checkboxes Exclusivos, Base Menor Padrão)
         self.chk_berco_maior = QtWidgets.QCheckBox("Base Maior (74.6x104.6mm | H=2.6mm)")
         self.chk_berco_menor = QtWidgets.QCheckBox("Base Menor (52.5x74.5mm | H=2.6mm)")
-        self.chk_berco_maior.setChecked(True)
+        self.chk_berco_menor.setChecked(True)
 
         self.group_berco = QtWidgets.QButtonGroup(self)
         self.group_berco.addButton(self.chk_berco_maior)
@@ -1551,16 +1581,32 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         coil_actions_layout = QtWidgets.QVBoxLayout(group_coil_actions)
         coil_actions_layout.setSpacing(8)
 
-        coil_sample_count_layout = QtWidgets.QFormLayout()
-        self.combo_num_amostras_caracterizacao = QtWidgets.QComboBox()
-        self.combo_num_amostras_caracterizacao.addItems([
-            "1 Amostra (Instantânea)",
-            "10 Amostras no mesmo CSV",
-            "100 Amostras no mesmo CSV",
-            "1000 Amostras no mesmo CSV"
-        ])
-        coil_sample_count_layout.addRow("Qtd Amostras/Arquivo:", self.combo_num_amostras_caracterizacao)
-        coil_actions_layout.addLayout(coil_sample_count_layout)
+        lbl_num_amostras = QtWidgets.QLabel("Qtd Amostras / Arquivo:")
+        lbl_num_amostras.setStyleSheet("color: #e1e1e6; font-weight: bold; font-size: 8.5pt;")
+        coil_actions_layout.addWidget(lbl_num_amostras)
+
+        self.chk_num_amostras = {}
+        self.group_num_amostras = QtWidgets.QButtonGroup(self)
+        layout_num_amostras_grid = QtWidgets.QGridLayout()
+        layout_num_amostras_grid.setSpacing(4)
+
+        opcoes_amostras = [
+            ("1 Amostra", 1),
+            ("10 Amostras", 10),
+            ("100 Amostras", 100),
+            ("1000 Amostras", 1000)
+        ]
+
+        for idx_a, (label_a, val_a) in enumerate(opcoes_amostras):
+            chk = QtWidgets.QCheckBox(label_a)
+            chk.setProperty("val_n", val_a)
+            self.chk_num_amostras[val_a] = chk
+            self.group_num_amostras.addButton(chk)
+            if val_a == 1:
+                chk.setChecked(True)
+            layout_num_amostras_grid.addWidget(chk, idx_a // 2, idx_a % 2)
+
+        coil_actions_layout.addLayout(layout_num_amostras_grid)
 
         self.btn_record_coil_test = QtWidgets.QPushButton("Gravar Ensaio de Caracterização")
         self.btn_record_coil_test.setMinimumHeight(45)
@@ -1620,7 +1666,6 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         scroll_coil.setWidget(scroll_coil_content)
         coil_left_layout.addWidget(scroll_coil)
-        tab_coil_layout.addWidget(coil_left)
 
         # Sub-painel Direito: Gráficos Comparativos e Console Técnico
         coil_right = QtWidgets.QWidget()
@@ -1674,7 +1719,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         """)
         coil_right_layout.addWidget(self.txt_coil_report, 1)
 
-        tab_coil_layout.addWidget(coil_right)
+        self.splitter_tab_coil.addWidget(coil_left)
+        self.splitter_tab_coil.addWidget(coil_right)
+        self.splitter_tab_coil.setSizes([380, 1000])
+
+        tab_coil_outer_layout.addWidget(self.splitter_tab_coil)
 
         # Conecta sinal de mudança de aba para carregar/atualizar os gráficos da Aba 4
         self.tab_widget.currentChanged.connect(self.ao_mudar_aba)
@@ -3920,6 +3969,23 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if hasattr(self, 'tooltip_estatistico') and self.tooltip_estatistico.isVisible():
                 self.tooltip_estatistico.hide()
 
+    def obter_num_amostras_selecionado(self):
+        if hasattr(self, 'group_num_amostras') and self.group_num_amostras.checkedButton():
+            return self.group_num_amostras.checkedButton().property("val_n")
+        return 1
+
+    def toggle_painel_lateral_caracterizacao(self):
+        if not hasattr(self, 'splitter_tab_coil'):
+            return
+        left_widget = self.splitter_tab_coil.widget(0)
+        if left_widget:
+            vis = left_widget.isVisible()
+            left_widget.setVisible(not vis)
+            if vis:
+                self.btn_toggle_coil_left.setText("▶ Exibir Painel Lateral")
+            else:
+                self.btn_toggle_coil_left.setText("◀ Esconder Painel Lateral")
+
     def obter_material_selecionado(self):
         if hasattr(self, 'group_materiais') and self.group_materiais.checkedButton():
             return self.group_materiais.checkedButton().text()
@@ -3955,15 +4021,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         classe = self.obter_classe_selecionada()
         sample_id = self.edit_coil_sample_id.text().strip()
         local_sel = self.obter_locais_amostra_selecionados()
-
-        target_n_str = self.combo_num_amostras_caracterizacao.currentText()
-        target_n = 1
-        if "1000" in target_n_str:
-            target_n = 1000
-        elif "100" in target_n_str:
-            target_n = 100
-        elif "10" in target_n_str:
-            target_n = 10
+        target_n = self.obter_num_amostras_selecionado()
 
         if target_n == 1:
             try:
