@@ -152,3 +152,6 @@ class CollapsibleGroupBox(QtWidgets.QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
         self.content_container.setLayout(layout)
+
+    def setContentLayout(self, layout):
+        self.setLayout(layout)

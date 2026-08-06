@@ -1350,49 +1350,36 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.btn_open_coil_dialog.clicked.connect(self.abrir_dialogo_cadastro_bobina)
         group_coil_select_layout.addWidget(self.btn_open_coil_dialog)
 
-        # Container para os Radio Buttons (Bullet Points) dos sensores
-        self.layout_radio_bobinas = QtWidgets.QVBoxLayout()
+        # Container para os Radio Buttons (Bullet Points) dos sensores (Divisão em 2 colunas)
+        self.layout_radio_bobinas = QtWidgets.QGridLayout()
         self.layout_radio_bobinas.setSpacing(4)
         self.group_radio_bobinas = QtWidgets.QButtonGroup(self)
         
         group_coil_select_layout.addLayout(self.layout_radio_bobinas)
         scroll_coil_layout.addWidget(group_coil_select)
 
-        # 2. Exibição das Características do Sensor Selecionado (Card no Canto Esquerdo)
-        group_coil_card = QtWidgets.QGroupBox("Características do Sensor Selecionado")
-        group_coil_card.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                margin-top: 12px;
-                font-weight: bold;
-                color: #00e676;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 3px;
-            }
-        """)
-        coil_card_layout = QtWidgets.QVBoxLayout(group_coil_card)
+        # 2. Exibição das Características do Sensor Selecionado (Card Colapsável / Exibir-Esconder)
+        group_coil_card = CollapsibleGroupBox("Características do Sensor Selecionado", parent=self)
+        coil_card_layout = QtWidgets.QVBoxLayout()
         self.txt_coil_specs_card = QtWidgets.QTextEdit()
         self.txt_coil_specs_card.setReadOnly(True)
-        self.txt_coil_specs_card.setMinimumHeight(160)
+        self.txt_coil_specs_card.setMinimumHeight(150)
         self.txt_coil_specs_card.setStyleSheet("""
             QTextEdit {
                 background-color: #121214;
                 color: #00ff00;
                 font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 9.5pt;
+                font-size: 8.5pt;
                 border: 1px solid #2a2a2e;
                 border-radius: 4px;
                 padding: 6px;
             }
         """)
         coil_card_layout.addWidget(self.txt_coil_specs_card)
+        group_coil_card.setContentLayout(coil_card_layout)
         scroll_coil_layout.addWidget(group_coil_card)
 
-        # 2. Calculadora e Condições de Ensaio (Lift-Off & Amostra)
+        # 3. Calculadora e Condições de Ensaio (Lift-Off & Amostra)
         group_coil_env = QtWidgets.QGroupBox("Calculadora de Lift-Off (Espaçadores & Berço)")
         group_coil_env.setStyleSheet("""
             QGroupBox {
@@ -1407,6 +1394,34 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 left: 8px;
                 padding: 0 3px;
             }
+            QCheckBox, QRadioButton {
+                color: #ffffff !important;
+                font-size: 8pt;
+                font-weight: bold;
+                spacing: 5px;
+            }
+            QCheckBox::indicator, QRadioButton::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1.5px solid #888888;
+                background-color: #222225;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+                border: 1.5px solid #00e676;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #00e676;
+                border: 1.5px solid #ffffff;
+            }
+            QRadioButton::indicator {
+                border-radius: 7px;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #29b6f6;
+                border: 2px solid #ffffff;
+                border-radius: 7px;
+            }
         """)
         coil_env_layout = QtWidgets.QVBoxLayout(group_coil_env)
         coil_env_layout.setSpacing(8)
@@ -1414,46 +1429,42 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         coil_env_form = QtWidgets.QFormLayout()
         coil_env_form.setSpacing(6)
 
-        # Seleção da Base Berço
-        self.combo_berco_modelo = QtWidgets.QComboBox()
-        self.combo_berco_modelo.addItems([
-            "Base Maior (74.6 x 104.6 mm | H=2.6 mm)",
-            "Base Menor (52.5 x 74.5 mm | H=2.6 mm)"
-        ])
-        self.combo_berco_modelo.currentIndexChanged.connect(self.calcular_liftoff_bancada)
-        coil_env_form.addRow("Modelo do Berço:", self.combo_berco_modelo)
+        # Seleção da Base Berço (Checkboxes Exclusivos)
+        self.chk_berco_maior = QtWidgets.QCheckBox("Base Maior (74.6x104.6mm | H=2.6mm)")
+        self.chk_berco_menor = QtWidgets.QCheckBox("Base Menor (52.5x74.5mm | H=2.6mm)")
+        self.chk_berco_maior.setChecked(True)
 
-        # Seleção de Espaçadores Empilhados via Listas Suspensas (QComboBox)
+        self.group_berco = QtWidgets.QButtonGroup(self)
+        self.group_berco.addButton(self.chk_berco_maior)
+        self.group_berco.addButton(self.chk_berco_menor)
+
+        self.chk_berco_maior.toggled.connect(self.calcular_liftoff_bancada)
+        self.chk_berco_menor.toggled.connect(self.calcular_liftoff_bancada)
+
+        layout_berco = QtWidgets.QVBoxLayout()
+        layout_berco.setSpacing(3)
+        layout_berco.addWidget(self.chk_berco_maior)
+        layout_berco.addWidget(self.chk_berco_menor)
+        coil_env_form.addRow("Modelo do Berço:", layout_berco)
+
+        # Seleção de Espaçadores Empilhados via Checkboxes
+        self.chk_espacador_5mm = QtWidgets.QCheckBox("5mm")
+        self.chk_espacador_4mm = QtWidgets.QCheckBox("4mm")
+        self.chk_espacador_2mm = QtWidgets.QCheckBox("2mm")
+        self.chk_espacador_1mm = QtWidgets.QCheckBox("1mm")
+
+        self.chk_espacador_5mm.toggled.connect(self.calcular_liftoff_bancada)
+        self.chk_espacador_4mm.toggled.connect(self.calcular_liftoff_bancada)
+        self.chk_espacador_2mm.toggled.connect(self.calcular_liftoff_bancada)
+        self.chk_espacador_1mm.toggled.connect(self.calcular_liftoff_bancada)
+
         layout_spacers = QtWidgets.QGridLayout()
         layout_spacers.setSpacing(4)
-
-        self.combo_espacador_5mm = QtWidgets.QComboBox()
-        self.combo_espacador_5mm.addItems(["0", "1", "2", "3", "4"])
-        self.combo_espacador_5mm.currentIndexChanged.connect(self.calcular_liftoff_bancada)
-
-        self.combo_espacador_4mm = QtWidgets.QComboBox()
-        self.combo_espacador_4mm.addItems(["0", "1", "2", "3", "4"])
-        self.combo_espacador_4mm.currentIndexChanged.connect(self.calcular_liftoff_bancada)
-
-        self.combo_espacador_2mm = QtWidgets.QComboBox()
-        self.combo_espacador_2mm.addItems(["0", "1", "2", "3", "4"])
-        self.combo_espacador_2mm.currentIndexChanged.connect(self.calcular_liftoff_bancada)
-
-        self.combo_espacador_1mm = QtWidgets.QComboBox()
-        self.combo_espacador_1mm.addItems(["0", "1", "2", "3", "4"])
-        self.combo_espacador_1mm.currentIndexChanged.connect(self.calcular_liftoff_bancada)
-
-        layout_spacers.addWidget(QtWidgets.QLabel("5mm:"), 0, 0)
-        layout_spacers.addWidget(self.combo_espacador_5mm, 0, 1)
-        layout_spacers.addWidget(QtWidgets.QLabel("4mm:"), 0, 2)
-        layout_spacers.addWidget(self.combo_espacador_4mm, 0, 3)
-
-        layout_spacers.addWidget(QtWidgets.QLabel("2mm:"), 1, 0)
-        layout_spacers.addWidget(self.combo_espacador_2mm, 1, 1)
-        layout_spacers.addWidget(QtWidgets.QLabel("1mm:"), 1, 2)
-        layout_spacers.addWidget(self.combo_espacador_1mm, 1, 3)
-
-        coil_env_form.addRow("Espaçadores (Qtd):", layout_spacers)
+        layout_spacers.addWidget(self.chk_espacador_5mm, 0, 0)
+        layout_spacers.addWidget(self.chk_espacador_4mm, 0, 1)
+        layout_spacers.addWidget(self.chk_espacador_2mm, 1, 0)
+        layout_spacers.addWidget(self.chk_espacador_1mm, 1, 1)
+        coil_env_form.addRow("Espaçadores:", layout_spacers)
 
         # Distância Resultante (Calculada e Editável)
         self.spin_liftoff_dist = QtWidgets.QDoubleSpinBox()
@@ -1463,13 +1474,39 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.spin_liftoff_dist.setValue(0.0)
         coil_env_form.addRow("Distância Lift-Off (d):", self.spin_liftoff_dist)
 
-        self.combo_coil_material = QtWidgets.QComboBox()
-        self.combo_coil_material.addItems(["Ar Livre", "A36 Comum", "A36 GE", "A36 GF"])
-        coil_env_form.addRow("Cupom / Material:", self.combo_coil_material)
+        # Seleção de Material por Checkboxes (Exclusivos)
+        self.chk_materiais = {}
+        self.group_materiais = QtWidgets.QButtonGroup(self)
+        layout_mat_grid = QtWidgets.QGridLayout()
+        layout_mat_grid.setSpacing(3)
 
-        self.combo_coil_classe = QtWidgets.QComboBox()
-        self.combo_coil_classe.addItems(["Ar Livre", "Saudável", "Leve", "Moderada", "Avançada", "Corroído"])
-        coil_env_form.addRow("Estado de Corrosão:", self.combo_coil_classe)
+        materiais_lista = self.carregar_lista_materiais()
+        for idx_m, mat_nome in enumerate(materiais_lista):
+            chk = QtWidgets.QCheckBox(mat_nome)
+            self.chk_materiais[mat_nome] = chk
+            self.group_materiais.addButton(chk)
+            if idx_m == 0:
+                chk.setChecked(True)
+            layout_mat_grid.addWidget(chk, idx_m // 2, idx_m % 2)
+
+        coil_env_form.addRow("Cupom / Material:", layout_mat_grid)
+
+        # Seleção de Estado de Corrosão por Checkboxes (Exclusivos)
+        self.chk_classes = {}
+        self.group_classes = QtWidgets.QButtonGroup(self)
+        layout_cls_grid = QtWidgets.QGridLayout()
+        layout_cls_grid.setSpacing(3)
+
+        classes_lista = ["Ar Livre", "Saudável", "Leve", "Moderada", "Avançada", "Corroído"]
+        for idx_c, cls_nome in enumerate(classes_lista):
+            chk = QtWidgets.QCheckBox(cls_nome)
+            self.chk_classes[cls_nome] = chk
+            self.group_classes.addButton(chk)
+            if cls_nome == "Saudável":
+                chk.setChecked(True)
+            layout_cls_grid.addWidget(chk, idx_c // 2, idx_c % 2)
+
+        coil_env_form.addRow("Estado de Corrosão:", layout_cls_grid)
 
         self.edit_coil_sample_id = QtWidgets.QLineEdit("1")
         coil_env_form.addRow("ID da Amostra:", self.edit_coil_sample_id)
@@ -1481,7 +1518,6 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         layout_locais.setSpacing(3)
         for idx_l, nome_l in enumerate(locais_opcoes):
             chk = QtWidgets.QCheckBox(nome_l)
-            chk.setStyleSheet("color: #e1e1e6; font-size: 8.5pt;")
             self.chk_locais[nome_l] = chk
             layout_locais.addWidget(chk, idx_l // 2, idx_l % 2)
 
@@ -3645,7 +3681,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     # =====================================================================
     def atualizar_lista_radio_bobinas(self):
         """
-        Reconstrói os Radio Buttons (bullet points) para cada bobina cadastrada no coil_manager.
+        Reconstrói os Radio Buttons (bullet points) para cada bobina cadastrada no coil_manager em 2 colunas.
         """
         for i in reversed(range(self.layout_radio_bobinas.count())):
             item = self.layout_radio_bobinas.takeAt(i)
@@ -3661,21 +3697,26 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         sorted_ids = sorted(coils.keys())
         first_btn = None
-        for cid in sorted_ids:
+        for idx, cid in enumerate(sorted_ids):
             info = coils[cid]
-            label = f"ID {info['id']} ({info['inductance_uh']:.1f} uH | {info['core']})"
+            label = f"ID {info['id']} ({info['inductance_uh']:.1f}uH|{info['core']})"
             radio = QtWidgets.QRadioButton(label)
             radio.setProperty("coil_id", cid)
             radio.setStyleSheet("""
                 QRadioButton {
-                    color: #e1e1e6; font-size: 10pt; font-weight: bold; padding: 2px;
+                    color: #ffffff !important; font-size: 8pt; font-weight: bold; padding: 2px;
+                }
+                QRadioButton::indicator {
+                    width: 14px; height: 14px; border: 1.5px solid #888888; background-color: #222225; border-radius: 7px;
                 }
                 QRadioButton::indicator:checked {
-                    background-color: #29b6f6; border: 2px solid #ffffff; border-radius: 6px;
+                    background-color: #00e676; border: 2px solid #ffffff; border-radius: 7px;
                 }
             """)
             radio.toggled.connect(self.ao_selecionar_radio_bobina)
-            self.layout_radio_bobinas.addWidget(radio)
+            row_idx = idx // 2
+            col_idx = idx % 2
+            self.layout_radio_bobinas.addWidget(radio, row_idx, col_idx)
             self.group_radio_bobinas.addButton(radio)
             if first_btn is None:
                 first_btn = radio
@@ -3699,22 +3740,22 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
     def calcular_liftoff_bancada(self, *args):
         """
-        Calcula automaticamente a distância real de Lift-Off (d) baseada nas listas suspensas (QComboBox)
+        Calcula automaticamente a distância real de Lift-Off (d) baseada nos checkboxes
         de espaçadores empilhados, na altura do piso do berço (2.6 mm) e na altura total da bobina ativa.
         """
-        if not hasattr(self, 'combo_espacador_5mm'):
+        if not hasattr(self, 'chk_espacador_5mm'):
             return
 
-        try:
-            q_5mm = int(self.combo_espacador_5mm.currentText())
-            q_4mm = int(self.combo_espacador_4mm.currentText())
-            q_2mm = int(self.combo_espacador_2mm.currentText())
-            q_1mm = int(self.combo_espacador_1mm.currentText())
-        except ValueError:
-            q_5mm, q_4mm, q_2mm, q_1mm = 0, 0, 0, 0
+        h_espacadores = 0.0
+        if getattr(self, 'chk_espacador_5mm', None) and self.chk_espacador_5mm.isChecked():
+            h_espacadores += 5.0
+        if getattr(self, 'chk_espacador_4mm', None) and self.chk_espacador_4mm.isChecked():
+            h_espacadores += 4.0
+        if getattr(self, 'chk_espacador_2mm', None) and self.chk_espacador_2mm.isChecked():
+            h_espacadores += 2.0
+        if getattr(self, 'chk_espacador_1mm', None) and self.chk_espacador_1mm.isChecked():
+            h_espacadores += 1.0
 
-        h_espacadores = (q_5mm * 5.0) + (q_4mm * 4.0) + (q_2mm * 2.0) + (q_1mm * 1.0)
-        
         h_berco_piso = 2.6
         h_total_berco = h_espacadores + h_berco_piso
 
@@ -3879,6 +3920,16 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if hasattr(self, 'tooltip_estatistico') and self.tooltip_estatistico.isVisible():
                 self.tooltip_estatistico.hide()
 
+    def obter_material_selecionado(self):
+        if hasattr(self, 'group_materiais') and self.group_materiais.checkedButton():
+            return self.group_materiais.checkedButton().text()
+        return "Ar Livre"
+
+    def obter_classe_selecionada(self):
+        if hasattr(self, 'group_classes') and self.group_classes.checkedButton():
+            return self.group_classes.checkedButton().text()
+        return "Saudável"
+
     def obter_locais_amostra_selecionados(self):
         locais_sel = [nome for nome, chk in getattr(self, 'chk_locais', {}).items() if chk.isChecked()]
         if not locais_sel:
@@ -3900,8 +3951,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         coil_info = self.obter_especificacoes_bobina_atuais()
         dist_mm = self.spin_liftoff_dist.value()
-        material = self.combo_coil_material.currentText()
-        classe = self.combo_coil_classe.currentText()
+        material = self.obter_material_selecionado()
+        classe = self.obter_classe_selecionada()
         sample_id = self.edit_coil_sample_id.text().strip()
         local_sel = self.obter_locais_amostra_selecionados()
 
