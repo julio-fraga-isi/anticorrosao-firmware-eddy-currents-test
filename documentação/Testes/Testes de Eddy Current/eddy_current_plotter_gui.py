@@ -1402,12 +1402,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         group_coil_select_layout.addWidget(self.btn_open_coil_dialog)
 
         # Container para os Radio Buttons (Bullet Points) dos sensores
-        self.layout_radio_bobinas = QtWidgets.QGridLayout()
+        self.widget_radio_bobinas_container = QtWidgets.QWidget()
+        self.layout_radio_bobinas = QtWidgets.QGridLayout(self.widget_radio_bobinas_container)
+        self.layout_radio_bobinas.setContentsMargins(0, 0, 0, 0)
         self.layout_radio_bobinas.setSpacing(4)
         self.group_radio_bobinas = QtWidgets.QButtonGroup(self)
         self.lista_widgets_radio_bobinas = []
         
-        group_coil_select_layout.addLayout(self.layout_radio_bobinas)
+        group_coil_select_layout.addWidget(self.widget_radio_bobinas_container)
         scroll_coil_layout.addWidget(group_coil_select)
 
         # 2. Exibição das Características do Sensor Selecionado (Card Colapsável / Exibir-Esconder)
@@ -1431,7 +1433,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         group_coil_card.setContentLayout(coil_card_layout)
         scroll_coil_layout.addWidget(group_coil_card)
 
-        # 3. Calculadora e Condições de Ensaio (Lift-Off & Amostra)
+        # 3. Calculadora de Lift-Off (Espaçadores & Berço)
         group_coil_env = QtWidgets.QGroupBox("Calculadora de Lift-Off (Espaçadores & Berço)")
         group_coil_env.setStyleSheet("""
             QGroupBox {
@@ -1540,7 +1542,57 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.spin_liftoff_dist.setSuffix(" mm")
         self.spin_liftoff_dist.setValue(0.0)
         coil_env_form.addRow("Distância Lift-Off (d):", self.spin_liftoff_dist)
-        coil_env_form.addRow(criar_linha_separadora())
+
+        coil_env_layout.addLayout(coil_env_form)
+
+        # Label com equação do cálculo automático de Lift-Off
+        self.lbl_calculo_liftoff_info = QtWidgets.QLabel("Fórmula: d = (Espaçadores + 2.6 mm) - H_bobina")
+        self.lbl_calculo_liftoff_info.setStyleSheet("color: #f1c40f; font-size: 8.5pt; font-family: monospace;")
+        coil_env_layout.addWidget(self.lbl_calculo_liftoff_info)
+
+        scroll_coil_layout.addWidget(group_coil_env)
+
+        # 4. Seleção do Cupom / Amostra
+        group_coil_coupon = QtWidgets.QGroupBox("Seleção do Cupom / Amostra")
+        group_coil_coupon.setStyleSheet("""
+            QGroupBox {
+                border: 1px solid #3a3a3c;
+                border-radius: 4px;
+                margin-top: 12px;
+                font-weight: bold;
+                color: #26a69a;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 3px;
+            }
+            QCheckBox, QRadioButton {
+                color: #ffffff !important;
+                font-size: 8pt;
+                font-weight: bold;
+                spacing: 5px;
+            }
+            QCheckBox::indicator, QRadioButton::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1.5px solid #888888;
+                background-color: #222225;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+                border: 1.5px solid #00e676;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #00e676;
+                border: 1.5px solid #ffffff;
+            }
+        """)
+        coil_coupon_layout = QtWidgets.QVBoxLayout(group_coil_coupon)
+        coil_coupon_layout.setSpacing(8)
+
+        coil_coupon_form = QtWidgets.QFormLayout()
+        coil_coupon_form.setSpacing(6)
 
         # Seleção de Material por Checkboxes (Exclusivos)
         self.chk_materiais = {}
@@ -1561,9 +1613,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 chk.setChecked(True)
             self.layout_mat_grid.addWidget(chk, idx_m // 3, idx_m % 3)
 
-        coil_env_form.addRow("Cupom / Material:", self.widget_mat_container)
+        coil_coupon_form.addRow("Cupom / Material:", self.widget_mat_container)
         self.group_materiais.buttonClicked.connect(self.ao_alterar_material_caracterizacao)
-        coil_env_form.addRow(criar_linha_separadora())
+        coil_coupon_form.addRow(criar_linha_separadora())
 
         # Seleção de Estado de Corrosão por Checkboxes (Exclusivos)
         self.chk_classes = {}
@@ -1584,13 +1636,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 chk.setChecked(True)
             self.layout_cls_grid.addWidget(chk, idx_c // 3, idx_c % 3)
 
-        coil_env_form.addRow("Estado de Corrosão:", self.widget_cls_container)
+        coil_coupon_form.addRow("Estado de Corrosão:", self.widget_cls_container)
         self.group_classes.buttonClicked.connect(self.ao_alterar_classe_caracterizacao)
-        coil_env_form.addRow(criar_linha_separadora())
+        coil_coupon_form.addRow(criar_linha_separadora())
 
         self.edit_coil_sample_id = QtWidgets.QLineEdit("1")
-        coil_env_form.addRow("ID da Amostra:", self.edit_coil_sample_id)
-        coil_env_form.addRow(criar_linha_separadora())
+        coil_coupon_form.addRow("ID da Amostra:", self.edit_coil_sample_id)
+        coil_coupon_form.addRow(criar_linha_separadora())
 
         # Checkboxes para Seleção do Local da Amostra
         self.chk_locais = {}
@@ -1606,7 +1658,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.lista_widgets_locais.append(chk)
             self.layout_locais_grid.addWidget(chk, idx_l // 3, idx_l % 3)
 
-        coil_env_form.addRow("Local da Amostra:", self.widget_locais_container)
+        coil_coupon_form.addRow("Local da Amostra:", self.widget_locais_container)
+        coil_coupon_layout.addLayout(coil_coupon_form)
+
+        scroll_coil_layout.addWidget(group_coil_coupon)
 
         coil_env_layout.addLayout(coil_env_form)
 
@@ -4055,12 +4110,21 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if item and item.widget():
                 item.widget().hide()
 
+        grid_layout.setHorizontalSpacing(10)
+        grid_layout.setVerticalSpacing(4)
+
+        for c_idx in range(num_cols + 2):
+            grid_layout.setColumnStretch(c_idx, 0)
+
         for idx, w in enumerate(widgets_list):
             r = idx // num_cols
             c = idx % num_cols
-            grid_layout.addWidget(w, r, c)
+            w.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Preferred)
+            grid_layout.addWidget(w, r, c, QtCore.Qt.AlignLeft)
             w.setVisible(True)
             w.show()
+
+        grid_layout.setColumnStretch(num_cols, 1)
 
     def obter_num_colunas_seletores_atual(self):
         if hasattr(self, 'combo_num_colunas_painel'):
