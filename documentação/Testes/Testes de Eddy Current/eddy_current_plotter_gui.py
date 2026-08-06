@@ -1459,6 +1459,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         coil_env_form = QtWidgets.QFormLayout()
         coil_env_form.setSpacing(6)
 
+        def criar_linha_separadora():
+            line = QtWidgets.QFrame()
+            line.setFrameShape(QtWidgets.QFrame.HLine)
+            line.setFrameShadow(QtWidgets.QFrame.Sunken)
+            line.setStyleSheet("background-color: #3a3a3c; min-height: 1px; max-height: 1px; border: none; margin-top: 3px; margin-bottom: 3px;")
+            return line
+
         # Seleção da Base Berço (Checkboxes Exclusivos, Base Menor Padrão)
         self.chk_berco_maior = QtWidgets.QCheckBox("Base Maior (74.6x104.6mm | H=2.6mm)")
         self.chk_berco_menor = QtWidgets.QCheckBox("Base Menor (52.5x74.5mm | H=2.6mm)")
@@ -1476,6 +1483,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         layout_berco.addWidget(self.chk_berco_maior)
         layout_berco.addWidget(self.chk_berco_menor)
         coil_env_form.addRow("Modelo do Berço:", layout_berco)
+        coil_env_form.addRow(criar_linha_separadora())
 
         # Seleção de Espaçadores Empilhados via Checkboxes
         self.chk_espacador_5mm = QtWidgets.QCheckBox("5mm")
@@ -1495,6 +1503,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         layout_spacers.addWidget(self.chk_espacador_2mm, 1, 0)
         layout_spacers.addWidget(self.chk_espacador_1mm, 1, 1)
         coil_env_form.addRow("Espaçadores:", layout_spacers)
+        coil_env_form.addRow(criar_linha_separadora())
 
         # Distância Resultante (Calculada e Editável)
         self.spin_liftoff_dist = QtWidgets.QDoubleSpinBox()
@@ -1503,6 +1512,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.spin_liftoff_dist.setSuffix(" mm")
         self.spin_liftoff_dist.setValue(0.0)
         coil_env_form.addRow("Distância Lift-Off (d):", self.spin_liftoff_dist)
+        coil_env_form.addRow(criar_linha_separadora())
 
         # Seleção de Material por Checkboxes (Exclusivos)
         self.chk_materiais = {}
@@ -1521,6 +1531,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         coil_env_form.addRow("Cupom / Material:", layout_mat_grid)
         self.group_materiais.buttonClicked.connect(self.ao_alterar_material_caracterizacao)
+        coil_env_form.addRow(criar_linha_separadora())
 
         # Seleção de Estado de Corrosão por Checkboxes (Exclusivos)
         self.chk_classes = {}
@@ -1539,9 +1550,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         coil_env_form.addRow("Estado de Corrosão:", layout_cls_grid)
         self.group_classes.buttonClicked.connect(self.ao_alterar_classe_caracterizacao)
+        coil_env_form.addRow(criar_linha_separadora())
 
         self.edit_coil_sample_id = QtWidgets.QLineEdit("1")
         coil_env_form.addRow("ID da Amostra:", self.edit_coil_sample_id)
+        coil_env_form.addRow(criar_linha_separadora())
 
         # Checkboxes para Seleção do Local da Amostra
         self.chk_locais = {}
@@ -1578,6 +1591,26 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 subcontrol-origin: margin;
                 left: 8px;
                 padding: 0 3px;
+            }
+            QCheckBox, QRadioButton {
+                color: #ffffff !important;
+                font-size: 8pt;
+                font-weight: bold;
+                spacing: 5px;
+            }
+            QCheckBox::indicator, QRadioButton::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1.5px solid #888888;
+                background-color: #222225;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+                border: 1.5px solid #00e676;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #00e676;
+                border: 1.5px solid #ffffff;
             }
         """)
         coil_actions_layout = QtWidgets.QVBoxLayout(group_coil_actions)
