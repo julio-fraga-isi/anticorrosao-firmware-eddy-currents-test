@@ -1309,7 +1309,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         tab_coil_outer_layout.setContentsMargins(4, 4, 4, 4)
         tab_coil_outer_layout.setSpacing(4)
 
-        # Barra Superior de Controles da Aba 5 (Botão Esconder/Exibir Painel Lateral)
+        # Barra Superior de Controles da Aba 5 (Botão Esconder/Exibir Painel Lateral + Seletor de Colunas)
         top_bar_tab5 = QtWidgets.QHBoxLayout()
         self.btn_toggle_coil_left = QtWidgets.QPushButton("◀ Esconder Painel Lateral")
         self.btn_toggle_coil_left.setMinimumHeight(28)
@@ -1323,6 +1323,27 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         """)
         self.btn_toggle_coil_left.clicked.connect(self.toggle_painel_lateral_caracterizacao)
         top_bar_tab5.addWidget(self.btn_toggle_coil_left)
+        top_bar_tab5.addSpacing(15)
+
+        lbl_cols = QtWidgets.QLabel("Colunas dos Seletores:")
+        lbl_cols.setStyleSheet("color: #e1e1e6; font-size: 8.5pt; font-weight: bold;")
+        top_bar_tab5.addWidget(lbl_cols)
+
+        self.combo_num_colunas_painel = QtWidgets.QComboBox()
+        self.combo_num_colunas_painel.addItems(["1 Coluna", "2 Colunas", "3 Colunas", "4 Colunas"])
+        self.combo_num_colunas_painel.setCurrentIndex(2)  # Padrão: 3 Colunas
+        self.combo_num_colunas_painel.setStyleSheet("""
+            QComboBox {
+                background-color: #2c2c2e; color: #00e676; border: 1px solid #3a3a3c;
+                border-radius: 4px; padding: 3px 8px; font-weight: bold; font-size: 8.5pt;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1e1e1f; color: #ffffff; selection-background-color: #00e676; selection-color: #000000;
+            }
+        """)
+        self.combo_num_colunas_painel.currentIndexChanged.connect(self.reorganizar_colunas_seletores_caracterizacao)
+        top_bar_tab5.addWidget(self.combo_num_colunas_painel)
+
         top_bar_tab5.addStretch()
         tab_coil_outer_layout.addLayout(top_bar_tab5)
 
@@ -1380,10 +1401,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.btn_open_coil_dialog.clicked.connect(self.abrir_dialogo_cadastro_bobina)
         group_coil_select_layout.addWidget(self.btn_open_coil_dialog)
 
-        # Container para os Radio Buttons (Bullet Points) dos sensores (Divisão em 2 colunas)
+        # Container para os Radio Buttons (Bullet Points) dos sensores
         self.layout_radio_bobinas = QtWidgets.QGridLayout()
         self.layout_radio_bobinas.setSpacing(4)
         self.group_radio_bobinas = QtWidgets.QButtonGroup(self)
+        self.lista_widgets_radio_bobinas = []
         
         group_coil_select_layout.addLayout(self.layout_radio_bobinas)
         scroll_coil_layout.addWidget(group_coil_select)
@@ -1478,11 +1500,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.chk_berco_maior.toggled.connect(self.calcular_liftoff_bancada)
         self.chk_berco_menor.toggled.connect(self.calcular_liftoff_bancada)
 
-        layout_berco = QtWidgets.QVBoxLayout()
-        layout_berco.setSpacing(3)
-        layout_berco.addWidget(self.chk_berco_maior)
-        layout_berco.addWidget(self.chk_berco_menor)
-        coil_env_form.addRow("Modelo do Berço:", layout_berco)
+        self.layout_berco_grid = QtWidgets.QGridLayout()
+        self.layout_berco_grid.setSpacing(3)
+        self.lista_widgets_berco = [self.chk_berco_maior, self.chk_berco_menor]
+        coil_env_form.addRow("Modelo do Berço:", self.layout_berco_grid)
         coil_env_form.addRow(criar_linha_separadora())
 
         # Seleção de Espaçadores Empilhados via Checkboxes
@@ -1496,13 +1517,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.chk_espacador_2mm.toggled.connect(self.calcular_liftoff_bancada)
         self.chk_espacador_1mm.toggled.connect(self.calcular_liftoff_bancada)
 
-        layout_spacers = QtWidgets.QGridLayout()
-        layout_spacers.setSpacing(4)
-        layout_spacers.addWidget(self.chk_espacador_5mm, 0, 0)
-        layout_spacers.addWidget(self.chk_espacador_4mm, 0, 1)
-        layout_spacers.addWidget(self.chk_espacador_2mm, 1, 0)
-        layout_spacers.addWidget(self.chk_espacador_1mm, 1, 1)
-        coil_env_form.addRow("Espaçadores:", layout_spacers)
+        self.layout_spacers_grid = QtWidgets.QGridLayout()
+        self.layout_spacers_grid.setSpacing(4)
+        self.lista_widgets_spacers = [self.chk_espacador_5mm, self.chk_espacador_4mm, self.chk_espacador_2mm, self.chk_espacador_1mm]
+        coil_env_form.addRow("Espaçadores:", self.layout_spacers_grid)
         coil_env_form.addRow(criar_linha_separadora())
 
         # Distância Resultante (Calculada e Editável)
@@ -1517,38 +1535,40 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Seleção de Material por Checkboxes (Exclusivos)
         self.chk_materiais = {}
         self.group_materiais = QtWidgets.QButtonGroup(self)
-        layout_mat_grid = QtWidgets.QGridLayout()
-        layout_mat_grid.setSpacing(3)
+        self.layout_mat_grid = QtWidgets.QGridLayout()
+        self.layout_mat_grid.setSpacing(3)
+        self.lista_widgets_materiais = []
 
         materiais_lista = self.carregar_lista_materiais()
         for idx_m, mat_nome in enumerate(materiais_lista):
             chk = QtWidgets.QCheckBox(mat_nome)
             self.chk_materiais[mat_nome] = chk
             self.group_materiais.addButton(chk)
+            self.lista_widgets_materiais.append(chk)
             if idx_m == 0:
                 chk.setChecked(True)
-            layout_mat_grid.addWidget(chk, idx_m // 2, idx_m % 2)
 
-        coil_env_form.addRow("Cupom / Material:", layout_mat_grid)
+        coil_env_form.addRow("Cupom / Material:", self.layout_mat_grid)
         self.group_materiais.buttonClicked.connect(self.ao_alterar_material_caracterizacao)
         coil_env_form.addRow(criar_linha_separadora())
 
         # Seleção de Estado de Corrosão por Checkboxes (Exclusivos)
         self.chk_classes = {}
         self.group_classes = QtWidgets.QButtonGroup(self)
-        layout_cls_grid = QtWidgets.QGridLayout()
-        layout_cls_grid.setSpacing(3)
+        self.layout_cls_grid = QtWidgets.QGridLayout()
+        self.layout_cls_grid.setSpacing(3)
+        self.lista_widgets_classes = []
 
         classes_lista = ["Ar Livre", "Saudável", "Leve", "Moderada", "Avançada", "Corroído"]
         for idx_c, cls_nome in enumerate(classes_lista):
             chk = QtWidgets.QCheckBox(cls_nome)
             self.chk_classes[cls_nome] = chk
             self.group_classes.addButton(chk)
+            self.lista_widgets_classes.append(chk)
             if cls_nome == "Saudável":
                 chk.setChecked(True)
-            layout_cls_grid.addWidget(chk, idx_c // 2, idx_c % 2)
 
-        coil_env_form.addRow("Estado de Corrosão:", layout_cls_grid)
+        coil_env_form.addRow("Estado de Corrosão:", self.layout_cls_grid)
         self.group_classes.buttonClicked.connect(self.ao_alterar_classe_caracterizacao)
         coil_env_form.addRow(criar_linha_separadora())
 
@@ -1559,14 +1579,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Checkboxes para Seleção do Local da Amostra
         self.chk_locais = {}
         locais_opcoes = ["São Paulo", "Ceara", "Venancio", "Caxias", "Rosario", "Senai", "Branco"]
-        layout_locais = QtWidgets.QGridLayout()
-        layout_locais.setSpacing(3)
+        self.layout_locais_grid = QtWidgets.QGridLayout()
+        self.layout_locais_grid.setSpacing(3)
+        self.lista_widgets_locais = []
         for idx_l, nome_l in enumerate(locais_opcoes):
             chk = QtWidgets.QCheckBox(nome_l)
             self.chk_locais[nome_l] = chk
-            layout_locais.addWidget(chk, idx_l // 2, idx_l % 2)
+            self.lista_widgets_locais.append(chk)
 
-        coil_env_form.addRow("Local da Amostra:", layout_locais)
+        coil_env_form.addRow("Local da Amostra:", self.layout_locais_grid)
 
         coil_env_layout.addLayout(coil_env_form)
 
@@ -1772,6 +1793,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Reconstrói a lista dinâmica de materiais e de bobinas no início
         self.atualizar_widgets_materiais()
         self.atualizar_lista_radio_bobinas()
+        self.reorganizar_colunas_seletores_caracterizacao()
 
     def ajustar_viewbox_secundaria(self):
         # Ajusta a escala da ViewBox secundária (AUC) para coincidir com o tamanho do gráfico
@@ -3765,7 +3787,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     # =====================================================================
     def atualizar_lista_radio_bobinas(self):
         """
-        Reconstrói os Radio Buttons (bullet points) para cada bobina cadastrada no coil_manager em 2 colunas.
+        Reconstrói os Radio Buttons (bullet points) para cada bobina cadastrada no coil_manager em N colunas.
         """
         for i in reversed(range(self.layout_radio_bobinas.count())):
             item = self.layout_radio_bobinas.takeAt(i)
@@ -3779,9 +3801,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         if not coils:
             return
 
+        self.lista_widgets_radio_bobinas = []
         sorted_ids = sorted(coils.keys())
         first_btn = None
-        for idx, cid in enumerate(sorted_ids):
+        for cid in sorted_ids:
             info = coils[cid]
             label = f"ID {info['id']} ({info['inductance_uh']:.1f}uH|{info['core']})"
             radio = QtWidgets.QRadioButton(label)
@@ -3798,12 +3821,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 }
             """)
             radio.toggled.connect(self.ao_selecionar_radio_bobina)
-            row_idx = idx // 2
-            col_idx = idx % 2
-            self.layout_radio_bobinas.addWidget(radio, row_idx, col_idx)
             self.group_radio_bobinas.addButton(radio)
+            self.lista_widgets_radio_bobinas.append(radio)
             if first_btn is None:
                 first_btn = radio
+
+        n_cols = self.obter_num_colunas_seletores_atual()
+        self.reorganizar_grid_widgets(self.layout_radio_bobinas, self.lista_widgets_radio_bobinas, n_cols)
 
         if first_btn:
             first_btn.setChecked(True)
@@ -4003,6 +4027,52 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         else:
             if hasattr(self, 'tooltip_estatistico') and self.tooltip_estatistico.isVisible():
                 self.tooltip_estatistico.hide()
+
+    def reorganizar_grid_widgets(self, grid_layout, widgets_list, num_cols):
+        if not grid_layout or not widgets_list:
+            return
+        for i in reversed(range(grid_layout.count())):
+            grid_layout.takeAt(i)
+
+        for idx, w in enumerate(widgets_list):
+            r = idx // num_cols
+            c = idx % num_cols
+            grid_layout.addWidget(w, r, c)
+
+    def obter_num_colunas_seletores_atual(self):
+        if hasattr(self, 'combo_num_colunas_painel'):
+            txt = self.combo_num_colunas_painel.currentText()
+            if "1" in txt:
+                return 1
+            elif "2" in txt:
+                return 2
+            elif "4" in txt:
+                return 4
+        return 3
+
+    def reorganizar_colunas_seletores_caracterizacao(self):
+        n_cols = self.obter_num_colunas_seletores_atual()
+
+        if hasattr(self, 'lista_widgets_radio_bobinas') and hasattr(self, 'layout_radio_bobinas'):
+            self.reorganizar_grid_widgets(self.layout_radio_bobinas, self.lista_widgets_radio_bobinas, n_cols)
+
+        if hasattr(self, 'lista_widgets_berco') and hasattr(self, 'layout_berco_grid'):
+            self.reorganizar_grid_widgets(self.layout_berco_grid, self.lista_widgets_berco, n_cols)
+
+        if hasattr(self, 'lista_widgets_spacers') and hasattr(self, 'layout_spacers_grid'):
+            self.reorganizar_grid_widgets(self.layout_spacers_grid, self.lista_widgets_spacers, n_cols)
+
+        if hasattr(self, 'lista_widgets_materiais') and hasattr(self, 'layout_mat_grid'):
+            self.reorganizar_grid_widgets(self.layout_mat_grid, self.lista_widgets_materiais, n_cols)
+
+        if hasattr(self, 'lista_widgets_classes') and hasattr(self, 'layout_cls_grid'):
+            self.reorganizar_grid_widgets(self.layout_cls_grid, self.lista_widgets_classes, n_cols)
+
+        if hasattr(self, 'lista_widgets_locais') and hasattr(self, 'layout_locais_grid'):
+            self.reorganizar_grid_widgets(self.layout_locais_grid, self.lista_widgets_locais, n_cols)
+
+        if hasattr(self, 'lista_widgets_num_amostras') and hasattr(self, 'layout_num_amostras_grid'):
+            self.reorganizar_grid_widgets(self.layout_num_amostras_grid, self.lista_widgets_num_amostras, n_cols)
 
     def obter_num_amostras_selecionado(self):
         if hasattr(self, 'group_num_amostras') and self.group_num_amostras.checkedButton():
