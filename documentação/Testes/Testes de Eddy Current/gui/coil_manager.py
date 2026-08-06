@@ -177,11 +177,15 @@ class CoilCharacterizationManager:
     def get_all_coils(self):
         return self.coils
 
-    def generate_standard_filename(self, coil_id, distance_mm, material, classe, timestamp=None):
+    def generate_standard_filename(self, coil_id, distance_mm, material, classe, local="Não Especificado", timestamp=None):
         if timestamp is None:
             ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         else:
-            ts_str = timestamp.replace("-", "").replace(":", "").replace(" ", "_")
+            try:
+                dt_obj = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+                ts_str = dt_obj.strftime("%Y%m%d_%H%M%S")
+            except Exception:
+                ts_str = timestamp.replace("-", "").replace(":", "").replace(" ", "_")
 
         coil_info = self.get_coil_info(coil_id)
         d_str = f"{coil_info['diameter_mm']:.1f}" if coil_info else "0"
@@ -189,12 +193,13 @@ class CoilCharacterizationManager:
         
         mat_clean = material.replace(" ", "_")
         cls_clean = classe.replace(" ", "_")
+        loc_clean = local.replace(" ", "_").replace(",", "-") if local else "Geral"
         dist_str = f"{float(distance_mm):.1f}"
 
-        filename = f"ensaio_bobina_{coil_id}_d{d_str}_l{l_str}_dist_{dist_str}mm_{mat_clean}_{cls_clean}_{ts_str}.csv"
+        filename = f"ensaio_bobina_{coil_id}_d{d_str}_l{l_str}_dist_{dist_str}mm_{mat_clean}_{loc_clean}_{cls_clean}_{ts_str}.csv"
         return filename
 
-    def save_characterization_record(self, output_dir, id_amostra, coil_info, distance_mm, material, classe, dt_us, curves, timestamp=None):
+    def save_characterization_record(self, output_dir, id_amostra, coil_info, distance_mm, material, classe, dt_us, curves, local="Não Especificado", timestamp=None):
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -212,12 +217,13 @@ class CoilCharacterizationManager:
             distance_mm=distance_mm,
             material=material,
             classe=classe,
+            local=local,
             timestamp=timestamp
         )
         filepath = os.path.join(output_dir, filename)
 
         header = [
-            "id_amostra", "id_bobina", "indutancia_uh", "resistencia_ohm",
+            "id_amostra", "local", "id_bobina", "indutancia_uh", "resistencia_ohm",
             "diametro_mm", "altura_mm", "espiras", "fio_awg", "nucleo",
             "distancia_mm", "material", "classe", "timestamp", "dt_us"
         ] + [f"p_{i}" for i in range(256)]
@@ -227,6 +233,7 @@ class CoilCharacterizationManager:
             sample_label = f"{id_amostra}_{idx+1}" if len(curves_list) > 1 else str(id_amostra)
             row = [
                 sample_label,
+                local,
                 coil_info["id"],
                 f"{coil_info['inductance_uh']:.2f}",
                 f"{coil_info['resistance_ohm']:.2f}",
@@ -278,6 +285,7 @@ class CoilCharacterizationManager:
         first_row = rows[0]
         try:
             id_amostra = first_row[headers.index("id_amostra")] if "id_amostra" in headers else first_row[0]
+            local = first_row[headers.index("local")] if "local" in headers else "Não Especificado"
             id_bobina = first_row[headers.index("id_bobina")] if "id_bobina" in headers else "681"
             indutancia_uh = float(first_row[headers.index("indutancia_uh")]) if "indutancia_uh" in headers else 697.0
             resistencia_ohm = float(first_row[headers.index("resistencia_ohm")]) if "resistencia_ohm" in headers else 2.3
@@ -327,6 +335,7 @@ class CoilCharacterizationManager:
             "filename": os.path.basename(filepath),
             "num_samples": len(all_curves),
             "id_amostra": id_amostra,
+            "local": local,
             "id_bobina": id_bobina,
             "indutancia_uh": indutancia_uh,
             "resistencia_ohm": resistencia_ohm,
@@ -584,7 +593,7 @@ class Coil3DPlotDialog(QtWidgets.QDialog):
         top_bar.addWidget(QtWidgets.QLabel("Agrupar/Colorir por:"))
         
         self.combo_group_by = QtWidgets.QComboBox()
-        self.combo_group_by.addItems(["Material / Cupom", "ID da Bobina / Sensor", "Classe de Corrosão"])
+        self.combo_group_by.addItems(["Material / Cupom", "Local da Amostra", "ID da Bobina / Sensor", "Classe de Corrosão"])
         self.combo_group_by.currentIndexChanged.connect(self.plot_3d)
         top_bar.addWidget(self.combo_group_by)
 
@@ -623,7 +632,7 @@ class Coil3DPlotDialog(QtWidgets.QDialog):
         elif hasattr(ax, 'w_xaxis'):
             ax.w_xaxis.set_pane_color((0.11, 0.11, 0.14, 1.0))
             ax.w_yaxis.set_pane_color((0.11, 0.11, 0.14, 1.0))
-            ax.w_zaxis.set_pane_color((0.11, 0.11, 0.14, 1.0))
+            ax.zaxis.set_pane_color((0.11, 0.11, 0.14, 1.0))
         
         ax.tick_params(colors='#e1e1e6')
         ax.set_xlabel('Distância - d (mm)', color='#00e676', labelpad=10, fontweight='bold')
@@ -637,16 +646,18 @@ class Coil3DPlotDialog(QtWidgets.QDialog):
             return
 
         group_mode = self.combo_group_by.currentText()
-        group_mode = self.combo_group_by.currentText()
         groups = {}
         total_pts = 0
 
         for rec in self.records:
             if "Material" in group_mode:
                 key = rec.get("material", "Outro")
+            elif "Local" in group_mode:
+                key = f"Local: {rec.get('local', 'Não Especificado')}"
             elif "Bobina" in group_mode:
                 key = f"Bobina {rec.get('id_bobina', '?')}"
             else:
+                key = rec.get("classe", "Saudável").capitalize()
                 key = rec.get("classe", "Saudável").capitalize()
 
             if key not in groups:

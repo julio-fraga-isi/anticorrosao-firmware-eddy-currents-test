@@ -1474,6 +1474,19 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.edit_coil_sample_id = QtWidgets.QLineEdit("1")
         coil_env_form.addRow("ID da Amostra:", self.edit_coil_sample_id)
 
+        # Checkboxes para Seleção do Local da Amostra
+        self.chk_locais = {}
+        locais_opcoes = ["São Paulo", "Ceara", "Venancio", "Caxias", "Rosario", "Senai", "Branco"]
+        layout_locais = QtWidgets.QGridLayout()
+        layout_locais.setSpacing(3)
+        for idx_l, nome_l in enumerate(locais_opcoes):
+            chk = QtWidgets.QCheckBox(nome_l)
+            chk.setStyleSheet("color: #e1e1e6; font-size: 8.5pt;")
+            self.chk_locais[nome_l] = chk
+            layout_locais.addWidget(chk, idx_l // 2, idx_l % 2)
+
+        coil_env_form.addRow("Local da Amostra:", layout_locais)
+
         coil_env_layout.addLayout(coil_env_form)
 
         # Label com equação do cálculo automático de Lift-Off
@@ -3840,6 +3853,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             tooltip_text = (
                 f"📁 <b>Arquivo:</b> {melhor_rec['filename']}<br>"
                 f"🆔 <b>Amostra:</b> {sample_str}<br>"
+                f"📍 <b>Local:</b> {melhor_rec.get('local', 'Não Especificado')}<br>"
                 f"🧲 <b>Bobina:</b> ID {melhor_rec['id_bobina']} ({melhor_rec['indutancia_uh']:.1f} &mu;H)<br>"
                 f"🛡️ <b>Material:</b> {melhor_rec['material']}<br>"
                 f"📊 <b>Estado:</b> {melhor_rec['classe'].capitalize()}<br>"
@@ -3865,6 +3879,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if hasattr(self, 'tooltip_estatistico') and self.tooltip_estatistico.isVisible():
                 self.tooltip_estatistico.hide()
 
+    def obter_locais_amostra_selecionados(self):
+        locais_sel = [nome for nome, chk in getattr(self, 'chk_locais', {}).items() if chk.isChecked()]
+        if not locais_sel:
+            return "Não Especificado"
+        return ", ".join(locais_sel)
+
     def obter_especificacoes_bobina_atuais(self):
         if hasattr(self, 'active_coil_info') and self.active_coil_info:
             return self.active_coil_info
@@ -3883,6 +3903,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         material = self.combo_coil_material.currentText()
         classe = self.combo_coil_classe.currentText()
         sample_id = self.edit_coil_sample_id.text().strip()
+        local_sel = self.obter_locais_amostra_selecionados()
 
         target_n_str = self.combo_num_amostras_caracterizacao.currentText()
         target_n = 1
@@ -3903,13 +3924,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     material=material,
                     classe=classe,
                     dt_us=self.dt_us,
-                    curves=list(self.last_valores)
+                    curves=list(self.last_valores),
+                    local=local_sel
                 )
 
                 rec = self.coil_manager.read_characterization_csv(filepath)
                 if rec:
                     self.loaded_coil_records.append(rec)
-                    item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['classe']}) [N=1] - {rec['filename']}"
+                    item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['local']}) ({rec['classe']}) [N=1] - {rec['filename']}"
                     item = QtWidgets.QListWidgetItem(item_text)
                     item.setData(QtCore.Qt.UserRole, rec)
                     item.setSelected(True)
@@ -3918,7 +3940,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
                 QtWidgets.QMessageBox.information(
                     self, "Ensaio Gravado",
-                    f"Ensaio de caracterização com 1 amostra gravado com sucesso!\n\nArquivo:\n{os.path.basename(filepath)}"
+                    f"Ensaio de caracterização com 1 amostra gravado com sucesso!\n\nLocal: {local_sel}\nArquivo:\n{os.path.basename(filepath)}"
                 )
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Erro ao Gravar", f"Erro ao gravar arquivo de caracterização: {e}")
@@ -3931,6 +3953,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 self.coil_recording_dist_mm = dist_mm
                 self.coil_recording_material = material
                 self.coil_recording_classe = classe
+                self.coil_recording_local = local_sel
                 self.is_recording_coil_multisample = True
                 
                 self.btn_record_coil_test.setEnabled(False)
@@ -3953,13 +3976,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     material=material,
                     classe=classe,
                     dt_us=self.dt_us,
-                    curves=curves_to_save
+                    curves=curves_to_save,
+                    local=local_sel
                 )
 
                 rec = self.coil_manager.read_characterization_csv(filepath)
                 if rec:
                     self.loaded_coil_records.append(rec)
-                    item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['classe']}) [N={rec['num_samples']}] - {rec['filename']}"
+                    item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['local']}) ({rec['classe']}) [N={rec['num_samples']}] - {rec['filename']}"
                     item = QtWidgets.QListWidgetItem(item_text)
                     item.setData(QtCore.Qt.UserRole, rec)
                     item.setSelected(True)
@@ -3968,7 +3992,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
                 QtWidgets.QMessageBox.information(
                     self, "Ensaio Gravado",
-                    f"Ensaio de {target_n} amostras gravado com sucesso no mesmo arquivo CSV:\n{os.path.basename(filepath)}"
+                    f"Ensaio de {target_n} amostras gravado com sucesso no mesmo arquivo CSV!\n\nLocal: {local_sel}\nArquivo:\n{os.path.basename(filepath)}"
                 )
 
     def finalizar_gravacao_multiamostras_caracterizacao(self):
@@ -3981,13 +4005,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 material=self.coil_recording_material,
                 classe=self.coil_recording_classe,
                 dt_us=self.dt_us,
-                curves=self.coil_recording_buffer
+                curves=self.coil_recording_buffer,
+                local=getattr(self, 'coil_recording_local', 'Não Especificado')
             )
 
             rec = self.coil_manager.read_characterization_csv(filepath)
             if rec:
                 self.loaded_coil_records.append(rec)
-                item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['classe']}) [N={rec['num_samples']}] - {rec['filename']}"
+                item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['local']}) ({rec['classe']}) [N={rec['num_samples']}] - {rec['filename']}"
                 item = QtWidgets.QListWidgetItem(item_text)
                 item.setData(QtCore.Qt.UserRole, rec)
                 item.setSelected(True)
