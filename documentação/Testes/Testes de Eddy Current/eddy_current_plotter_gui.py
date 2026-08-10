@@ -31,6 +31,44 @@ from gui.coil_manager import CoilCharacterizationManager, CoilRegistrationDialog
 # Configurações do Gráfico de Tendência
 MAX_TREND_POINTS = 200
 
+# Mapeamento unificado de cores por classe de degradação e formas por material
+CORES_CLASSES = {
+    "Saudável": "#3498db",
+    "Leve": "#1abc9c",
+    "Moderada": "#f1c40f",
+    "Avançada": "#e67e22",
+    "Corroído": "#e74c3c",
+    "Ar Livre": "#9b59b6"
+}
+
+SIMBOLOS_MATERIAIS = {
+    "A36 Comum": "o",
+    "A36 GE": "s",
+    "A36 GF": "d",
+    "Estrutura Torre": "t",
+    "Ar Livre": "+"
+}
+
+def obter_cor_classe(cls_nome):
+    if not cls_nome: return "#3498db"
+    raw = str(cls_nome).strip()
+    if "saud" in raw.lower(): return "#3498db"
+    if "leve" in raw.lower(): return "#1abc9c"
+    if "mod" in raw.lower(): return "#f1c40f"
+    if "avan" in raw.lower(): return "#e67e22"
+    if "corr" in raw.lower(): return "#e74c3c"
+    if "ar" in raw.lower(): return "#9b59b6"
+    return "#3498db"
+
+def obter_simbolo_material(mat_nome):
+    if not mat_nome: return "o"
+    raw = str(mat_nome).strip().upper()
+    if "GE" in raw: return "s"
+    if "GF" in raw: return "d"
+    if "TORRE" in raw or "ET" in raw: return "t"
+    if "AR" in raw or "AL" in raw: return "+"
+    return "o"
+
 
 class EddyCurrentPlotter(QtWidgets.QWidget):
 
@@ -297,7 +335,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         group_filters_layout.addWidget(QtWidgets.QLabel("Janela da Curva (pts):"), 1, 0)
         self.spin_janela_curva = QtWidgets.QSpinBox()
         self.spin_janela_curva.setRange(1, 25)
-        self.spin_janela_curva.setValue(5)
+        self.spin_janela_curva.setValue(1)
         self.spin_janela_curva.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
         self.spin_janela_curva.valueChanged.connect(lambda: self.treinar_classificador())
         group_filters_layout.addWidget(self.spin_janela_curva, 1, 1)
@@ -324,20 +362,20 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         group_filters_layout.addWidget(QtWidgets.QLabel("Histórico do Gráfico (pts):"), 5, 0)
         self.spin_janela_metricas = QtWidgets.QSpinBox()
         self.spin_janela_metricas.setRange(2, 1000)
-        self.spin_janela_metricas.setValue(10)
+        self.spin_janela_metricas.setValue(200)
         self.spin_janela_metricas.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
         self.spin_janela_metricas.valueChanged.connect(self.atualizar_tamanho_janela_metricas)
         group_filters_layout.addWidget(self.spin_janela_metricas, 5, 1)
         
         self.chk_ia_usa_media_movel = QtWidgets.QCheckBox("Classificar IA com Média Móvel")
         self.chk_ia_usa_media_movel.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
-        self.chk_ia_usa_media_movel.setChecked(True)
+        self.chk_ia_usa_media_movel.setChecked(False)
         group_filters_layout.addWidget(self.chk_ia_usa_media_movel, 6, 0, 1, 2)
         
         group_filters_layout.addWidget(QtWidgets.QLabel("Janela da Média da IA:"), 7, 0)
         self.spin_janela_ia = QtWidgets.QSpinBox()
         self.spin_janela_ia.setRange(2, 100)
-        self.spin_janela_ia.setValue(10)
+        self.spin_janela_ia.setValue(50)
         self.spin_janela_ia.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
         group_filters_layout.addWidget(self.spin_janela_ia, 7, 1)
         
@@ -766,6 +804,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.chk_filter_outliers.setChecked(False)
         group_filters_layout.addWidget(self.chk_filter_outliers, 7, 0, 1, 2)
 
+        self.chk_diferenciar_ids_tonalidade = QtWidgets.QCheckBox("Diferenciar Tonalidades por ID")
+        self.chk_diferenciar_ids_tonalidade.setToolTip("Altera a tonalidade (luminosidade HSL) dos pontos para diferenciar IDs de amostras distintos dentro do mesmo material/classe")
+        self.chk_diferenciar_ids_tonalidade.setChecked(False)
+        group_filters_layout.addWidget(self.chk_diferenciar_ids_tonalidade, 8, 0, 1, 2)
+
         # Conecta os sinais de mudança para atualizar os gráficos dinamicamente
         self.chk_filter_saudavel.stateChanged.connect(self.atualizar_graficos_estatisticos)
         self.chk_filter_leve.stateChanged.connect(self.atualizar_graficos_estatisticos)
@@ -774,6 +817,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.chk_filter_corroido.stateChanged.connect(self.atualizar_graficos_estatisticos)
         self.chk_filter_ar_cls.stateChanged.connect(self.atualizar_graficos_estatisticos)
         self.chk_filter_outliers.stateChanged.connect(self.atualizar_graficos_estatisticos)
+        self.chk_diferenciar_ids_tonalidade.stateChanged.connect(self.atualizar_graficos_estatisticos)
 
         stats_left_layout.addWidget(group_filters)
         
@@ -1325,14 +1369,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         top_bar_tab5.addWidget(self.btn_toggle_coil_left)
         top_bar_tab5.addSpacing(15)
 
-        lbl_cols = QtWidgets.QLabel("Colunas dos Seletores:")
-        lbl_cols.setStyleSheet("color: #e1e1e6; font-size: 8.5pt; font-weight: bold;")
-        top_bar_tab5.addWidget(lbl_cols)
-
-        self.combo_num_colunas_painel = QtWidgets.QComboBox()
-        self.combo_num_colunas_painel.addItems(["1 Coluna", "2 Colunas", "3 Colunas", "4 Colunas"])
-        self.combo_num_colunas_painel.setCurrentIndex(2)  # Padrão: 3 Colunas
-        self.combo_num_colunas_painel.setStyleSheet("""
+        opcoes_colunas = ["Auto (Dinâmico)", "1 Coluna", "2 Colunas", "3 Colunas", "4 Colunas", "5 Colunas"]
+        combo_style = """
             QComboBox {
                 background-color: #2c2c2e; color: #00e676; border: 1px solid #3a3a3c;
                 border-radius: 4px; padding: 3px 8px; font-weight: bold; font-size: 8.5pt;
@@ -1340,7 +1378,31 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             QComboBox QAbstractItemView {
                 background-color: #1e1e1f; color: #ffffff; selection-background-color: #00e676; selection-color: #000000;
             }
-        """)
+        """
+
+        # 1. Seletor exclusivo para Lista de Sensores / Bobinas
+        lbl_cols_bobinas = QtWidgets.QLabel("Colunas dos Sensores:")
+        lbl_cols_bobinas.setStyleSheet("color: #29b6f6; font-size: 8.5pt; font-weight: bold;")
+        top_bar_tab5.addWidget(lbl_cols_bobinas)
+
+        self.combo_num_colunas_bobinas = QtWidgets.QComboBox()
+        self.combo_num_colunas_bobinas.addItems(opcoes_colunas)
+        self.combo_num_colunas_bobinas.setCurrentIndex(2)  # Padrão: 2 Colunas (conforme imagem oficial)
+        self.combo_num_colunas_bobinas.setStyleSheet(combo_style)
+        self.combo_num_colunas_bobinas.currentIndexChanged.connect(self.reorganizar_colunas_seletores_caracterizacao)
+        top_bar_tab5.addWidget(self.combo_num_colunas_bobinas)
+
+        top_bar_tab5.addSpacing(15)
+
+        # 2. Seletor para os Demais Seletores (Espaçadores, Cupons, Corrosão, Locais, Amostras)
+        lbl_cols_painel = QtWidgets.QLabel("Colunas dos Outros Seletores:")
+        lbl_cols_painel.setStyleSheet("color: #e1e1e6; font-size: 8.5pt; font-weight: bold;")
+        top_bar_tab5.addWidget(lbl_cols_painel)
+
+        self.combo_num_colunas_painel = QtWidgets.QComboBox()
+        self.combo_num_colunas_painel.addItems(opcoes_colunas)
+        self.combo_num_colunas_painel.setCurrentIndex(0)  # Padrão: Auto (Dinâmico)
+        self.combo_num_colunas_painel.setStyleSheet(combo_style)
         self.combo_num_colunas_painel.currentIndexChanged.connect(self.reorganizar_colunas_seletores_caracterizacao)
         top_bar_tab5.addWidget(self.combo_num_colunas_painel)
 
@@ -1365,10 +1427,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         coil_left_layout = QtWidgets.QVBoxLayout(coil_left)
         coil_left_layout.setContentsMargins(0, 0, 0, 0)
 
-        scroll_coil = QtWidgets.QScrollArea()
-        scroll_coil.setWidgetResizable(True)
-        scroll_coil.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        scroll_coil.setStyleSheet("background-color: #1e1e1e; border: none;")
+        self.scroll_coil = QtWidgets.QScrollArea()
+        self.scroll_coil.setWidgetResizable(True)
+        self.scroll_coil.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.scroll_coil.setStyleSheet("background-color: #1e1e1e; border: none;")
         
         scroll_coil_content = QtWidgets.QWidget()
         scroll_coil_layout = QtWidgets.QVBoxLayout(scroll_coil_content)
@@ -1490,9 +1552,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             line.setStyleSheet("background-color: #3a3a3c; min-height: 1px; max-height: 1px; border: none; margin-top: 3px; margin-bottom: 3px;")
             return line
 
-        # Seleção da Base Berço (Checkboxes Exclusivos, Base Menor Padrão)
-        self.chk_berco_maior = QtWidgets.QCheckBox("Base Maior (74.6x104.6mm | H=2.6mm)")
-        self.chk_berco_menor = QtWidgets.QCheckBox("Base Menor (52.5x74.5mm | H=2.6mm)")
+        # Seleção da Base Berço (Checkboxes Exclusivos, Base P Padrão, 1 Coluna Fixa)
+        self.chk_berco_maior = QtWidgets.QCheckBox("Base G (74.6x104.6mm | H=2.6mm)")
+        self.chk_berco_menor = QtWidgets.QCheckBox("Base P (52.5x74.5mm | H=2.6mm)")
         self.chk_berco_menor.setChecked(True)
 
         self.group_berco = QtWidgets.QButtonGroup(self)
@@ -1502,45 +1564,88 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.chk_berco_maior.toggled.connect(self.calcular_liftoff_bancada)
         self.chk_berco_menor.toggled.connect(self.calcular_liftoff_bancada)
 
-        self.widget_berco_container = QtWidgets.QWidget()
-        self.layout_berco_grid = QtWidgets.QGridLayout(self.widget_berco_container)
-        self.layout_berco_grid.setContentsMargins(0, 0, 0, 0)
+        self.layout_berco_grid = QtWidgets.QVBoxLayout()
         self.layout_berco_grid.setSpacing(3)
-        self.lista_widgets_berco = [self.chk_berco_maior, self.chk_berco_menor]
-        for idx_b, chk_b in enumerate(self.lista_widgets_berco):
-            self.layout_berco_grid.addWidget(chk_b, idx_b // 3, idx_b % 3)
+        self.layout_berco_grid.addWidget(self.chk_berco_maior)
+        self.layout_berco_grid.addWidget(self.chk_berco_menor)
 
-        coil_env_form.addRow("Modelo do Berço:", self.widget_berco_container)
+        coil_env_form.addRow("Modelo do Berço:", self.layout_berco_grid)
         coil_env_form.addRow(criar_linha_separadora())
 
-        # Seleção de Espaçadores Empilhados via Checkboxes
-        self.chk_espacador_5mm = QtWidgets.QCheckBox("5mm")
-        self.chk_espacador_4mm = QtWidgets.QCheckBox("4mm")
-        self.chk_espacador_2mm = QtWidgets.QCheckBox("2mm")
-        self.chk_espacador_1mm = QtWidgets.QCheckBox("1mm")
+        # Seleção de Espaçadores Empilhados via 4 Colunas (5mm, 4mm, 2mm, 1mm) e 2 Linhas (1x, 2x)
+        self.chk_espacador_5mm_1 = QtWidgets.QCheckBox("1x")
+        self.chk_espacador_5mm_2 = QtWidgets.QCheckBox("2x")
+        self.chk_espacador_4mm_1 = QtWidgets.QCheckBox("1x")
+        self.chk_espacador_4mm_2 = QtWidgets.QCheckBox("2x")
+        self.chk_espacador_2mm_1 = QtWidgets.QCheckBox("1x")
+        self.chk_espacador_2mm_2 = QtWidgets.QCheckBox("2x")
+        self.chk_espacador_1mm_1 = QtWidgets.QCheckBox("1x")
+        self.chk_espacador_1mm_2 = QtWidgets.QCheckBox("2x")
 
-        self.chk_espacador_5mm.toggled.connect(self.calcular_liftoff_bancada)
-        self.chk_espacador_4mm.toggled.connect(self.calcular_liftoff_bancada)
-        self.chk_espacador_2mm.toggled.connect(self.calcular_liftoff_bancada)
-        self.chk_espacador_1mm.toggled.connect(self.calcular_liftoff_bancada)
+        # Aliases para compatibilidade legada
+        self.chk_espacador_5mm = self.chk_espacador_5mm_1
+        self.chk_espacador_4mm = self.chk_espacador_4mm_1
+        self.chk_espacador_2mm = self.chk_espacador_2mm_1
+        self.chk_espacador_1mm = self.chk_espacador_1mm_1
+
+        # Conecta o comportamento mutuamente exclusivo (1x vs 2x) por espessura
+        self.chk_espacador_5mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_5mm_1, self.chk_espacador_5mm_2))
+        self.chk_espacador_5mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_5mm_2, self.chk_espacador_5mm_1))
+
+        self.chk_espacador_4mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_4mm_1, self.chk_espacador_4mm_2))
+        self.chk_espacador_4mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_4mm_2, self.chk_espacador_4mm_1))
+
+        self.chk_espacador_2mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_2mm_1, self.chk_espacador_2mm_2))
+        self.chk_espacador_2mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_2mm_2, self.chk_espacador_2mm_1))
+
+        self.chk_espacador_1mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_1mm_1, self.chk_espacador_1mm_2))
+        self.chk_espacador_1mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_1mm_2, self.chk_espacador_1mm_1))
 
         self.widget_spacers_container = QtWidgets.QWidget()
-        self.layout_spacers_grid = QtWidgets.QGridLayout(self.widget_spacers_container)
-        self.layout_spacers_grid.setContentsMargins(0, 0, 0, 0)
-        self.layout_spacers_grid.setSpacing(4)
-        self.lista_widgets_spacers = [self.chk_espacador_5mm, self.chk_espacador_4mm, self.chk_espacador_2mm, self.chk_espacador_1mm]
-        for idx_s, chk_s in enumerate(self.lista_widgets_spacers):
-            self.layout_spacers_grid.addWidget(chk_s, idx_s // 3, idx_s % 3)
+        layout_spacers_h = QtWidgets.QHBoxLayout(self.widget_spacers_container)
+        layout_spacers_h.setContentsMargins(0, 2, 0, 2)
+        layout_spacers_h.setSpacing(0)
+
+        espacadores_cols = [
+            ("5mm", self.chk_espacador_5mm_1, self.chk_espacador_5mm_2),
+            ("4mm", self.chk_espacador_4mm_1, self.chk_espacador_4mm_2),
+            ("2mm", self.chk_espacador_2mm_1, self.chk_espacador_2mm_2),
+            ("1mm", self.chk_espacador_1mm_1, self.chk_espacador_1mm_2),
+        ]
+
+        for idx_col, (label_txt, chk_1, chk_2) in enumerate(espacadores_cols):
+            col_widget = QtWidgets.QWidget()
+            col_layout = QtWidgets.QVBoxLayout(col_widget)
+            col_layout.setContentsMargins(8, 2, 8, 2)
+            col_layout.setSpacing(4)
+
+            lbl_title = QtWidgets.QLabel(label_txt)
+            lbl_title.setAlignment(QtCore.Qt.AlignCenter)
+            lbl_title.setStyleSheet("font-weight: bold; color: #00e676; font-size: 9pt;")
+            col_layout.addWidget(lbl_title)
+            col_layout.addWidget(chk_1)
+            col_layout.addWidget(chk_2)
+
+            layout_spacers_h.addWidget(col_widget)
+
+            if idx_col < len(espacadores_cols) - 1:
+                sep_v = QtWidgets.QFrame()
+                sep_v.setFrameShape(QtWidgets.QFrame.VLine)
+                sep_v.setFrameShadow(QtWidgets.QFrame.Sunken)
+                sep_v.setStyleSheet("background-color: rgba(255, 255, 255, 0.15); width: 1px;")
+                layout_spacers_h.addWidget(sep_v)
 
         coil_env_form.addRow("Espaçadores:", self.widget_spacers_container)
         coil_env_form.addRow(criar_linha_separadora())
 
-        # Distância Resultante (Calculada e Editável)
+        # Distância Resultante (Calculada e Editável com Trava de Scroll e Confirmação ao Concluir Edição)
         self.spin_liftoff_dist = QtWidgets.QDoubleSpinBox()
         self.spin_liftoff_dist.setRange(0.0, 100.0)
         self.spin_liftoff_dist.setSingleStep(0.5)
         self.spin_liftoff_dist.setSuffix(" mm")
         self.spin_liftoff_dist.setValue(0.0)
+        self.spin_liftoff_dist.wheelEvent = lambda event: event.ignore()
+        self.spin_liftoff_dist.editingFinished.connect(self.ao_concluir_edicao_spin_liftoff)
         coil_env_form.addRow("Distância Lift-Off (d):", self.spin_liftoff_dist)
 
         coil_env_layout.addLayout(coil_env_form)
@@ -1594,7 +1699,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         coil_coupon_form = QtWidgets.QFormLayout()
         coil_coupon_form.setSpacing(6)
 
-        # Seleção de Material por Checkboxes (Exclusivos)
+        # 1º Item: ID da Amostra (Limitado a no máximo 3 caracteres conforme o novo padrão)
+        self.edit_coil_sample_id = QtWidgets.QLineEdit("1")
+        self.edit_coil_sample_id.setMaxLength(3)
+        self.edit_coil_sample_id.setToolTip("O ID da Amostra é limitado a no máximo 3 caracteres (ex: 001, 012, 100)")
+        self.edit_coil_sample_id.textChanged.connect(self.ao_validar_limite_id_amostra)
+        coil_coupon_form.addRow("ID da Amostra (Max 3):", self.edit_coil_sample_id)
+        coil_coupon_form.addRow(criar_linha_separadora())
+
+        # 2º Item: Cupom / Material por Checkboxes (Exclusivos)
         self.chk_materiais = {}
         self.group_materiais = QtWidgets.QButtonGroup(self)
         self.widget_mat_container = QtWidgets.QWidget()
@@ -1617,7 +1730,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.group_materiais.buttonClicked.connect(self.ao_alterar_material_caracterizacao)
         coil_coupon_form.addRow(criar_linha_separadora())
 
-        # Seleção de Estado de Corrosão por Checkboxes (Exclusivos)
+        # 3º Item: Seleção de Estado de Corrosão por Checkboxes (Exclusivos)
         self.chk_classes = {}
         self.group_classes = QtWidgets.QButtonGroup(self)
         self.widget_cls_container = QtWidgets.QWidget()
@@ -1640,11 +1753,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.group_classes.buttonClicked.connect(self.ao_alterar_classe_caracterizacao)
         coil_coupon_form.addRow(criar_linha_separadora())
 
-        self.edit_coil_sample_id = QtWidgets.QLineEdit("1")
-        coil_coupon_form.addRow("ID da Amostra:", self.edit_coil_sample_id)
-        coil_coupon_form.addRow(criar_linha_separadora())
-
-        # Checkboxes para Seleção do Local da Amostra
+        # 4º Item: Checkboxes para Seleção do Local da Amostra
         self.chk_locais = {}
         locais_opcoes = ["São Paulo", "Ceara", "Venancio", "Caxias", "Rosario", "Senai", "Branco"]
         self.widget_locais_container = QtWidgets.QWidget()
@@ -1663,16 +1772,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         scroll_coil_layout.addWidget(group_coil_coupon)
 
-        coil_env_layout.addLayout(coil_env_form)
-
-        # Label com equação do cálculo automático de Lift-Off
-        self.lbl_calculo_liftoff_info = QtWidgets.QLabel("Fórmula: d = (Espaçadores + 2.6 mm) - H_bobina")
-        self.lbl_calculo_liftoff_info.setStyleSheet("color: #f1c40f; font-size: 8.5pt; font-family: monospace;")
-        coil_env_layout.addWidget(self.lbl_calculo_liftoff_info)
-
-        scroll_coil_layout.addWidget(group_coil_env)
-
-        # 3. Botões de Gravação e Gerenciamento
+        # 5. Botões de Gravação e Gerenciamento
         group_coil_actions = QtWidgets.QGroupBox("Ações & Gravação de Testes")
         group_coil_actions.setStyleSheet("""
             QGroupBox {
@@ -1717,8 +1817,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         self.chk_num_amostras = {}
         self.group_num_amostras = QtWidgets.QButtonGroup(self)
-        layout_num_amostras_grid = QtWidgets.QGridLayout()
-        layout_num_amostras_grid.setSpacing(4)
+        self.widget_num_amostras_container = QtWidgets.QWidget()
+        self.layout_num_amostras_grid = QtWidgets.QGridLayout(self.widget_num_amostras_container)
+        self.layout_num_amostras_grid.setContentsMargins(0, 0, 0, 0)
+        self.layout_num_amostras_grid.setSpacing(4)
+        self.lista_widgets_num_amostras = []
 
         opcoes_amostras = [
             ("1 Amostra", 1),
@@ -1732,11 +1835,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             chk.setProperty("val_n", val_a)
             self.chk_num_amostras[val_a] = chk
             self.group_num_amostras.addButton(chk)
+            self.lista_widgets_num_amostras.append(chk)
             if val_a == 1:
                 chk.setChecked(True)
-            layout_num_amostras_grid.addWidget(chk, idx_a // 2, idx_a % 2)
+            self.layout_num_amostras_grid.addWidget(chk, idx_a // 3, idx_a % 3)
 
-        coil_actions_layout.addLayout(layout_num_amostras_grid)
+        coil_actions_layout.addWidget(self.widget_num_amostras_container)
 
         self.btn_record_coil_test = QtWidgets.QPushButton("Gravar Ensaio de Caracterização")
         self.btn_record_coil_test.setMinimumHeight(45)
@@ -1794,64 +1898,185 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         scroll_coil_layout.addWidget(group_coil_files)
 
-        scroll_coil.setWidget(scroll_coil_content)
-        coil_left_layout.addWidget(scroll_coil)
+        self.scroll_coil.setWidget(scroll_coil_content)
+        coil_left_layout.addWidget(self.scroll_coil)
 
-        # Sub-painel Direito: Gráficos Comparativos e Console Técnico
+        # Sub-painel Direito: Container de Sub-Abas da Caracterização (Comparativos, Tempo Real, Estatística)
         coil_right = QtWidgets.QWidget()
         coil_right_layout = QtWidgets.QVBoxLayout(coil_right)
         coil_right_layout.setContentsMargins(0, 0, 0, 0)
+        coil_right_layout.setSpacing(4)
+
+        self.tab_sub_caracterizacao = QtWidgets.QTabWidget()
+        self.tab_sub_caracterizacao.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #3a3a3c;
+                background-color: #121214;
+                border-radius: 4px;
+            }
+            QTabBar::tab {
+                background-color: #1e1e1f;
+                color: #a0a0a0;
+                padding: 6px 14px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                font-weight: bold;
+                font-size: 9pt;
+            }
+            QTabBar::tab:selected {
+                background-color: #2c2c2e;
+                color: #00e676;
+                border-bottom: 2px solid #00e676;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #2a2a2c;
+                color: #ffffff;
+            }
+        """)
+
+        # =====================================================================
+        # SUB-ABA 1: Comparativos de Lift-Off & Bobinas (Visualização Atual)
+        # =====================================================================
+        subtab_comparativo = QtWidgets.QWidget()
+        subtab_comp_layout = QtWidgets.QVBoxLayout(subtab_comparativo)
+        subtab_comp_layout.setContentsMargins(2, 2, 2, 2)
+        subtab_comp_layout.setSpacing(4)
 
         self.win_coil_plots = pg.GraphicsLayoutWidget()
         self.win_coil_plots.setBackground('#121214')
         self.win_coil_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_grafico_caracterizacao)
 
-        # Subplot 1: Decaimento V(t)
         self.plot_coil_decay = self.win_coil_plots.addPlot(row=0, col=0, title="Decaimento Transiente Comparativo V(t)")
         self.plot_coil_decay.setLabel('left', 'Tensão / ADC Counts')
         self.plot_coil_decay.setLabel('bottom', 'Tempo (us)')
         self.plot_coil_decay.showGrid(x=True, y=True, alpha=0.3)
 
-        # Subplot 2: Tau vs Distância
         self.plot_coil_tau_liftoff = self.win_coil_plots.addPlot(row=0, col=1, title="Constante de Tempo (Tau) vs Distância (Lift-Off)")
         self.plot_coil_tau_liftoff.setLabel('left', 'Tau (us)')
         self.plot_coil_tau_liftoff.setLabel('bottom', 'Distância (mm)')
         self.plot_coil_tau_liftoff.showGrid(x=True, y=True, alpha=0.3)
 
-        # Subplot 3: AUC vs Distância
         self.plot_coil_auc_liftoff = self.win_coil_plots.addPlot(row=1, col=0, title="Área Sob a Curva (AUC) vs Distância (Lift-Off)")
         self.plot_coil_auc_liftoff.setLabel('left', 'AUC (Counts.us)')
         self.plot_coil_auc_liftoff.setLabel('bottom', 'Distância (mm)')
         self.plot_coil_auc_liftoff.showGrid(x=True, y=True, alpha=0.3)
 
-        # Subplot 4: Indutância Efetiva L vs Distância
         self.plot_coil_l_liftoff = self.win_coil_plots.addPlot(row=1, col=1, title="Indutância Efetiva L vs Distância (Lift-Off)")
         self.plot_coil_l_liftoff.setLabel('left', 'Indutância L (uH)')
         self.plot_coil_l_liftoff.setLabel('bottom', 'Distância (mm)')
         self.plot_coil_l_liftoff.showGrid(x=True, y=True, alpha=0.3)
 
-        coil_right_layout.addWidget(self.win_coil_plots, 2)
+        subtab_comp_layout.addWidget(self.win_coil_plots, 2)
 
-        # Console de Resumo Técnico de Comparação
         self.txt_coil_report = QtWidgets.QTextEdit()
         self.txt_coil_report.setReadOnly(True)
-        self.txt_coil_report.setMaximumHeight(180)
+        self.txt_coil_report.setMaximumHeight(160)
         self.txt_coil_report.setStyleSheet("""
             QTextEdit {
-                background-color: #0c0c0d;
-                color: #00ff00;
+                background-color: #0c0c0d; color: #00ff00;
                 font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 9.5pt;
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                padding: 6px;
+                font-size: 9.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 6px;
             }
         """)
-        coil_right_layout.addWidget(self.txt_coil_report, 1)
+        subtab_comp_layout.addWidget(self.txt_coil_report, 1)
+        self.tab_sub_caracterizacao.addTab(subtab_comparativo, "📈 Comparativos de Lift-Off")
+
+        # =====================================================================
+        # SUB-ABA 2: Monitoramento em Tempo Real & Diagnóstico do Sensor
+        # =====================================================================
+        subtab_realtime = QtWidgets.QWidget()
+        subtab_rt_layout = QtWidgets.QVBoxLayout(subtab_realtime)
+        subtab_rt_layout.setContentsMargins(2, 2, 2, 2)
+        subtab_rt_layout.setSpacing(4)
+
+        self.win_coil_rt_plots = pg.GraphicsLayoutWidget()
+        self.win_coil_rt_plots.setBackground('#121214')
+
+        self.plot_coil_rt_live = self.win_coil_rt_plots.addPlot(row=0, col=0, title="Sinal Transiente em Tempo Real V(t) [Osciloscópio Live]")
+        self.plot_coil_rt_live.setLabel('left', 'ADC Counts')
+        self.plot_coil_rt_live.setLabel('bottom', 'Tempo (us)')
+        self.plot_coil_rt_live.showGrid(x=True, y=True, alpha=0.3)
+
+        self.plot_coil_rt_overlay = self.win_coil_rt_plots.addPlot(row=0, col=1, title="Sobreposição Live vs Curva de Referência do Sensor")
+        self.plot_coil_rt_overlay.setLabel('left', 'ADC Counts')
+        self.plot_coil_rt_overlay.setLabel('bottom', 'Tempo (us)')
+        self.plot_coil_rt_overlay.showGrid(x=True, y=True, alpha=0.3)
+
+        self.plot_coil_rt_residual = self.win_coil_rt_plots.addPlot(row=1, col=0, colSpan=2, title="Sinal Residual Delta V(t) [Medido - Referência]")
+        self.plot_coil_rt_residual.setLabel('left', 'Delta ADC Counts')
+        self.plot_coil_rt_residual.setLabel('bottom', 'Tempo (us)')
+        self.plot_coil_rt_residual.showGrid(x=True, y=True, alpha=0.3)
+
+        subtab_rt_layout.addWidget(self.win_coil_rt_plots, 2)
+
+        self.txt_coil_rt_report = QtWidgets.QTextEdit()
+        self.txt_coil_rt_report.setReadOnly(True)
+        self.txt_coil_rt_report.setMaximumHeight(160)
+        self.txt_coil_rt_report.setStyleSheet("""
+            QTextEdit {
+                background-color: #0c0c0d; color: #29b6f6;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 6px;
+            }
+        """)
+        subtab_rt_layout.addWidget(self.txt_coil_rt_report, 1)
+        self.tab_sub_caracterizacao.addTab(subtab_realtime, "⚡ Monitoramento em Tempo Real")
+
+        # =====================================================================
+        # SUB-ABA 3: Análise Estatística de Caracterização
+        # =====================================================================
+        subtab_stats = QtWidgets.QWidget()
+        subtab_st_layout = QtWidgets.QVBoxLayout(subtab_stats)
+        subtab_st_layout.setContentsMargins(2, 2, 2, 2)
+        subtab_st_layout.setSpacing(4)
+
+        self.win_coil_st_plots = pg.GraphicsLayoutWidget()
+        self.win_coil_st_plots.setBackground('#121214')
+        self.win_coil_st_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_grafico_estatistico_caracterizacao)
+
+        self.plot_coil_st_decay = self.win_coil_st_plots.addPlot(row=0, col=0, title="Sinais Médios de Decaimento (Média ± DP)")
+        self.plot_coil_st_decay.setLabel('left', 'Tensão / ADC Counts')
+        self.plot_coil_st_decay.setLabel('bottom', 'Tempo (us)')
+        self.plot_coil_st_decay.showGrid(x=True, y=True, alpha=0.3)
+
+        self.plot_coil_st_tau = self.win_coil_st_plots.addPlot(row=0, col=1, title="Distribuição da Constante de Tempo (Tau)")
+        self.plot_coil_st_tau.setLabel('left', 'Tau (us)')
+        self.plot_coil_st_tau.setLabel('bottom', 'Lift-Off (mm)')
+        self.plot_coil_st_tau.showGrid(x=True, y=True, alpha=0.3)
+
+        self.plot_coil_st_auc = self.win_coil_st_plots.addPlot(row=1, col=0, title="Distribuição da Área sob a Curva (AUC)")
+        self.plot_coil_st_auc.setLabel('left', 'AUC (Counts.us)')
+        self.plot_coil_st_auc.setLabel('bottom', 'Lift-Off (mm)')
+        self.plot_coil_st_auc.showGrid(x=True, y=True, alpha=0.3)
+
+        self.plot_coil_st_scatter = self.win_coil_st_plots.addPlot(row=1, col=1, title="Espaço de Características: AUC vs Tau")
+        self.plot_coil_st_scatter.setLabel('left', 'AUC (Counts.us)')
+        self.plot_coil_st_scatter.setLabel('bottom', 'Tau (us)')
+        self.plot_coil_st_scatter.showGrid(x=True, y=True, alpha=0.3)
+
+        subtab_st_layout.addWidget(self.win_coil_st_plots, 2)
+
+        self.txt_coil_st_report = QtWidgets.QTextEdit()
+        self.txt_coil_st_report.setReadOnly(True)
+        self.txt_coil_st_report.setMaximumHeight(160)
+        self.txt_coil_st_report.setStyleSheet("""
+            QTextEdit {
+                background-color: #0c0c0d; color: #f1c40f;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 9.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 6px;
+            }
+        """)
+        subtab_st_layout.addWidget(self.txt_coil_st_report, 1)
+        self.tab_sub_caracterizacao.addTab(subtab_stats, "📊 Análise Estatística de Caracterização")
+
+        coil_right_layout.addWidget(self.tab_sub_caracterizacao)
+        self.tab_sub_caracterizacao.currentChanged.connect(self.ao_mudar_subaba_caracterizacao)
 
         self.splitter_tab_coil.addWidget(coil_left)
         self.splitter_tab_coil.addWidget(coil_right)
         self.splitter_tab_coil.setSizes([380, 1000])
+        self.splitter_tab_coil.splitterMoved.connect(self.reorganizar_colunas_seletores_caracterizacao)
 
         tab_coil_outer_layout.addWidget(self.splitter_tab_coil)
 
@@ -3107,6 +3332,16 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.txt_report_stats.setPlainText("Sem dados correspondentes aos filtros selecionados.")
             return
 
+        # Verifica se a diferenciação de tonalidades por ID deve ser ativada
+        single_filter_active = (
+            len(materiais_ativos) == 1 and
+            len(classes_ativas) == 1 and
+            self.chk_filter_outliers.isChecked()
+        )
+        use_id_shading = single_filter_active or (
+            hasattr(self, 'chk_diferenciar_ids_tonalidade') and self.chk_diferenciar_ids_tonalidade.isChecked()
+        )
+
         # Classes na ordem correta de degradação e suas cores correspondentes
         CLASSES_ORDEM = ["Saudável", "Leve", "Moderada", "Avançada", "Corroído", "Ar Livre"]
         CORES_CLASSES = {
@@ -3125,6 +3360,37 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             "Corroído": (231, 76, 60),
             "Ar Livre": (155, 89, 182)
         }
+
+        # Se use_id_shading for True, mapeia cada ID único para uma TONALIDADE (luminosidade HSL) dentro do seu material/classe
+        N_samples = len(self.amostras_filtradas)
+        if use_id_shading and N_samples > 0:
+            grupos_amostras = {}
+            for a_item in self.amostras_filtradas:
+                key = (a_item["material"], a_item["classe"])
+                if key not in grupos_amostras:
+                    grupos_amostras[key] = []
+                grupos_amostras[key].append(a_item)
+
+            for key, g_items in grupos_amostras.items():
+                ids_unicos = sorted(list(set([str(a["id"]) for a in g_items])))
+                num_ids = len(ids_unicos)
+
+                id_to_lightness = {}
+                for idx_id, id_val in enumerate(ids_unicos):
+                    # Varia a luminosidade entre 0.35 (tom escuro) e 0.85 (tom claro) para cada ID distinto
+                    l_factor = 0.35 + 0.50 * (idx_id / max(1, num_ids - 1)) if num_ids > 1 else 0.55
+                    id_to_lightness[id_val] = l_factor
+
+                for a_item in g_items:
+                    id_str = str(a_item["id"])
+                    base_hex = CORES_CLASSES.get(a_item["classe"], "#3498db")
+                    base_qcol = QtGui.QColor(base_hex)
+                    h, s, l_val, a_alpha = base_qcol.getHslF()
+                    
+                    target_l = id_to_lightness.get(id_str, 0.55)
+                    adjusted_qcol = QtGui.QColor.fromHslF(h, min(1.0, s * 1.05), max(0.25, min(0.90, target_l)))
+                    a_item["color_hex"] = adjusted_qcol.name()
+                    a_item["brush"] = pg.mkBrush(adjusted_qcol)
 
         # Agrupa os dados filtrados por classe (usado nos outros plots)
         dados_por_classe = {c: {"auc": [], "tau": [], "curvas": []} for c in CLASSES_ORDEM}
@@ -3153,6 +3419,22 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         # 4. Gera o relatório estatístico formatado em texto para o console lateral (filtrado)
         report = []
+        if use_id_shading and N_samples > 0:
+            ids_unicos = sorted(list(set([str(a["id"]) for a in self.amostras_filtradas])))
+            num_ids = len(ids_unicos)
+            if num_ids > 1:
+                faixa_str = f"Tonalidades por ID Ativas: <b>{num_ids} IDs distintos</b> (Tonalidade escura &rarr; clara por ID em cada classe/material)"
+            else:
+                faixa_str = f"ID Único: <b>ID '{ids_unicos[0]}'</b> ({N_samples} amostras | Tonalidade padrão mantida)"
+
+            report.append(
+                f"<div style='background-color: #2c2c2e; padding: 6px 10px; border-radius: 4px; border: 1px solid #3a3a3c; margin-bottom: 8px;'>"
+                f"<b style='color: #00e676;'>🎨 Diferenciação de IDs por Tonalidade:</b><br>"
+                f"{faixa_str}<br>"
+                f"<small style='color: #a0a0a0;'>Cores originais mantidas. Diferentes IDs dentro da mesma classe/material possuem tonalidades (luminosidade HSL) distintas.</small>"
+                f"</div>"
+            )
+
         report.append("<h3>=== Resumo do Dataset (Filtrado) ===</h3>")
         
         # Ordenação das chaves por material, depois pela ordem lógica das classes
@@ -3275,6 +3557,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             color = CORES_CLASSES.get(c, "#7f8c8d")
             rgb = CORES_RGB.get(c, (127, 140, 141))
             
+            # Exibe o ID do ponto apenas se houver exatamente 1 material, 1 classe e IQR ativado (independente do total de amostras)
+            show_text_items = (
+                len(materiais_ativos) == 1 and
+                len(classes_ativas) == 1 and
+                self.chk_filter_outliers.isChecked()
+            )
+            sym_sz = 15 if show_text_items else 8
+            font_id_stat = QtGui.QFont("Segoe UI", 7, QtGui.QFont.Bold)
+
             # Gera o x_jitter para AUC e salva o valor exato em cada amostra
             x_jitter_auc = np.random.normal(x, 0.04, size=len(dados_auc))
             for idx_a, amostra in enumerate(amostras_classe):
@@ -3289,9 +3580,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     continue
                 x_sub = x_jitter_auc[indices_mat]
                 y_sub = np.array(dados_auc)[indices_mat]
-                self.plot_stat_auc.plot(x_sub, y_sub, pen=None, symbol=simbolo, symbolSize=8, 
-                                        symbolBrush=pg.mkBrush(rgb[0], rgb[1], rgb[2], 180), symbolPen=pg.mkPen('w', width=0.5))
-            
+                
+                if use_id_shading:
+                    brushes_mat = [amostras_classe[i].get("brush", pg.mkBrush(rgb[0], rgb[1], rgb[2], 180)) for i in indices_mat]
+                    self.plot_stat_auc.plot(x_sub, y_sub, pen=None, symbol=simbolo, symbolSize=10, 
+                                            symbolBrush=brushes_mat, symbolPen=pg.mkPen('w', width=0.4))
+                else:
+                    self.plot_stat_auc.plot(x_sub, y_sub, pen=None, symbol=simbolo, symbolSize=8, 
+                                            symbolBrush=pg.mkBrush(rgb[0], rgb[1], rgb[2], 180), symbolPen=pg.mkPen('w', width=0.5))
+
             m_a, s_a = np.mean(dados_auc), np.std(dados_auc)
             self.plot_stat_auc.plot([x, x], [m_a - s_a, m_a + s_a], pen=pg.mkPen(color, width=3))
             self.plot_stat_auc.plot([x - 0.1, x + 0.1], [m_a, m_a], pen=pg.mkPen('w', width=3))
@@ -3310,9 +3607,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     continue
                 x_sub = x_jitter_tau[indices_mat]
                 y_sub = np.array(dados_tau)[indices_mat]
-                self.plot_stat_tau.plot(x_sub, y_sub, pen=None, symbol=simbolo, symbolSize=8, 
-                                        symbolBrush=pg.mkBrush(rgb[0], rgb[1], rgb[2], 180), symbolPen=pg.mkPen('w', width=0.5))
-            
+                
+                if use_id_shading:
+                    brushes_mat = [amostras_classe[i].get("brush", pg.mkBrush(rgb[0], rgb[1], rgb[2], 180)) for i in indices_mat]
+                    self.plot_stat_tau.plot(x_sub, y_sub, pen=None, symbol=simbolo, symbolSize=10, 
+                                            symbolBrush=brushes_mat, symbolPen=pg.mkPen('w', width=0.4))
+                else:
+                    self.plot_stat_tau.plot(x_sub, y_sub, pen=None, symbol=simbolo, symbolSize=8, 
+                                            symbolBrush=pg.mkBrush(rgb[0], rgb[1], rgb[2], 180), symbolPen=pg.mkPen('w', width=0.5))
+
             m_t, s_t = np.mean(dados_tau), np.std(dados_tau)
             self.plot_stat_tau.plot([x, x], [m_t - s_t, m_t + s_t], pen=pg.mkPen(color, width=3))
             self.plot_stat_tau.plot([x - 0.1, x + 0.1], [m_t, m_t], pen=pg.mkPen('w', width=3))
@@ -3338,9 +3641,16 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     continue
                 tau_sub = [a["tau"] for a in amostras_mat]
                 auc_sub = [a["auc"] for a in amostras_mat]
-                self.plot_stat_scatter.plot(tau_sub, auc_sub, pen=None, symbol=simbolo, symbolSize=10,
-                                            symbolBrush=pg.mkBrush(rgb[0], rgb[1], rgb[2], 200),
-                                            symbolPen=pg.mkPen('w', width=0.5), name=f"{c.capitalize()} ({mat_nome})")
+                
+                if use_id_shading:
+                    brushes_mat = [a.get("brush", pg.mkBrush(rgb[0], rgb[1], rgb[2], 200)) for a in amostras_mat]
+                    self.plot_stat_scatter.plot(tau_sub, auc_sub, pen=None, symbol=simbolo, symbolSize=10,
+                                                symbolBrush=brushes_mat, symbolPen=pg.mkPen('w', width=0.4),
+                                                name=f"{c.capitalize()} ({mat_nome})")
+                else:
+                    self.plot_stat_scatter.plot(tau_sub, auc_sub, pen=None, symbol=simbolo, symbolSize=10,
+                                                symbolBrush=pg.mkBrush(rgb[0], rgb[1], rgb[2], 200),
+                                                symbolPen=pg.mkPen('w', width=0.5), name=f"{c.capitalize()} ({mat_nome})")
 
     def ao_mover_mouse_estatistico(self, pos):
         if not hasattr(self, 'amostras_filtradas') or not self.amostras_filtradas:
@@ -3381,8 +3691,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 break
                 
         if melhor_amostra:
+            cor_hex = melhor_amostra.get("color_hex", "#3498db")
+            color_badge = f"<span style='color: {cor_hex}; font-size: 14pt;'>■</span> " if "color_hex" in melhor_amostra else ""
             tooltip_text = (
-                f"🆔 <b>ID Cupom:</b> {melhor_amostra['id']}<br>"
+                f"{color_badge}🆔 <b>ID Cupom:</b> {melhor_amostra['id']}<br>"
                 f"🛡️ <b>Mat:</b> {melhor_amostra['material']}<br>"
                 f"📊 <b>Classe:</b> {melhor_amostra['classe'].capitalize()}<br>"
                 f"⏱️ <b>Tau:</b> {melhor_amostra['tau']:.3f} &mu;s<br>"
@@ -3878,7 +4190,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.lista_widgets_radio_bobinas = []
         sorted_ids = sorted(coils.keys())
         first_btn = None
-        for cid in sorted_ids:
+        n_cols = self.obter_num_colunas_para_grid(self.layout_radio_bobinas, self.lista_widgets_radio_bobinas, is_sensor_grid=True)
+        for idx, cid in enumerate(sorted_ids):
             info = coils[cid]
             label = f"ID {info['id']} ({info['inductance_uh']:.1f}uH|{info['core']})"
             radio = QtWidgets.QRadioButton(label)
@@ -3897,11 +4210,18 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             radio.toggled.connect(self.ao_selecionar_radio_bobina)
             self.group_radio_bobinas.addButton(radio)
             self.lista_widgets_radio_bobinas.append(radio)
+            self.layout_radio_bobinas.addWidget(radio, idx // n_cols, idx % n_cols)
+            radio.setVisible(True)
+            radio.show()
             if first_btn is None:
                 first_btn = radio
 
-        n_cols = self.obter_num_colunas_seletores_atual()
         self.reorganizar_grid_widgets(self.layout_radio_bobinas, self.lista_widgets_radio_bobinas, n_cols)
+        if hasattr(self, 'widget_radio_bobinas_container'):
+            self.widget_radio_bobinas_container.updateGeometry()
+            self.widget_radio_bobinas_container.adjustSize()
+            self.widget_radio_bobinas_container.setVisible(True)
+            self.widget_radio_bobinas_container.show()
 
         if first_btn:
             first_btn.setChecked(True)
@@ -3920,23 +4240,27 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.atualizar_card_especificacoes_bobina(info)
         self.calcular_liftoff_bancada()
 
+    def ao_alternar_checkbox_espacador(self, chk_clicado, chk_outro):
+        if chk_clicado.isChecked():
+            chk_outro.blockSignals(True)
+            chk_outro.setChecked(False)
+            chk_outro.blockSignals(False)
+        self.calcular_liftoff_bancada()
+
     def calcular_liftoff_bancada(self, *args):
         """
         Calcula automaticamente a distância real de Lift-Off (d) baseada nos checkboxes
-        de espaçadores empilhados, na altura do piso do berço (2.6 mm) e na altura total da bobina ativa.
+        de espaçadores empilhados (4 colunas: 5mm, 4mm, 2mm, 1mm; linhas: 1x, 2x), na altura do piso do berço (2.6 mm) e na altura total da bobina ativa.
         """
-        if not hasattr(self, 'chk_espacador_5mm'):
+        if not hasattr(self, 'chk_espacador_5mm_1'):
             return
 
-        h_espacadores = 0.0
-        if getattr(self, 'chk_espacador_5mm', None) and self.chk_espacador_5mm.isChecked():
-            h_espacadores += 5.0
-        if getattr(self, 'chk_espacador_4mm', None) and self.chk_espacador_4mm.isChecked():
-            h_espacadores += 4.0
-        if getattr(self, 'chk_espacador_2mm', None) and self.chk_espacador_2mm.isChecked():
-            h_espacadores += 2.0
-        if getattr(self, 'chk_espacador_1mm', None) and self.chk_espacador_1mm.isChecked():
-            h_espacadores += 1.0
+        count_5mm = 2 if (getattr(self, 'chk_espacador_5mm_2', None) and self.chk_espacador_5mm_2.isChecked()) else (1 if (getattr(self, 'chk_espacador_5mm_1', None) and self.chk_espacador_5mm_1.isChecked()) else 0)
+        count_4mm = 2 if (getattr(self, 'chk_espacador_4mm_2', None) and self.chk_espacador_4mm_2.isChecked()) else (1 if (getattr(self, 'chk_espacador_4mm_1', None) and self.chk_espacador_4mm_1.isChecked()) else 0)
+        count_2mm = 2 if (getattr(self, 'chk_espacador_2mm_2', None) and self.chk_espacador_2mm_2.isChecked()) else (1 if (getattr(self, 'chk_espacador_2mm_1', None) and self.chk_espacador_2mm_1.isChecked()) else 0)
+        count_1mm = 2 if (getattr(self, 'chk_espacador_1mm_2', None) and self.chk_espacador_1mm_2.isChecked()) else (1 if (getattr(self, 'chk_espacador_1mm_1', None) and self.chk_espacador_1mm_1.isChecked()) else 0)
+
+        h_espacadores = (count_5mm * 5.0) + (count_4mm * 4.0) + (count_2mm * 2.0) + (count_1mm * 1.0)
 
         h_berco_piso = 2.6
         h_total_berco = h_espacadores + h_berco_piso
@@ -3949,11 +4273,50 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 h_bobina = info.get('height_winding_mm', 8.5)
 
         d_liftoff = max(0.0, h_total_berco - h_bobina)
+        self._last_calculated_liftoff = d_liftoff
+        self.liftoff_manual_override = False
+
+        self._ignore_spin_liftoff_signals = True
         self.spin_liftoff_dist.setValue(d_liftoff)
+        self._ignore_spin_liftoff_signals = False
+
+        partes = []
+        if count_5mm > 0: partes.append(f"{count_5mm}x 5mm")
+        if count_4mm > 0: partes.append(f"{count_4mm}x 4mm")
+        if count_2mm > 0: partes.append(f"{count_2mm}x 2mm")
+        if count_1mm > 0: partes.append(f"{count_1mm}x 1mm")
+        txt_espacadores = " + ".join(partes) if partes else "Nenhum"
 
         self.lbl_calculo_liftoff_info.setText(
-            f"Fórmula Bancada: ({h_espacadores:.1f}mm espac. + {h_berco_piso:.1f}mm piso) - {h_bobina:.1f}mm altura bobina = {d_liftoff:.1f} mm"
+            f"Fórmula Bancada: ({h_espacadores:.1f}mm espac. [{txt_espacadores}] + {h_berco_piso:.1f}mm piso) - {h_bobina:.1f}mm bobina = {d_liftoff:.1f} mm"
         )
+
+    def ao_concluir_edicao_spin_liftoff(self):
+        if getattr(self, '_ignore_spin_liftoff_signals', False):
+            return
+
+        val = self.spin_liftoff_dist.value()
+        last_calc = getattr(self, '_last_calculated_liftoff', 0.0)
+        if abs(val - last_calc) < 1e-4:
+            self.liftoff_manual_override = False
+            return
+
+        if not getattr(self, 'liftoff_manual_override', False):
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Aviso de Alteração Manual de Lift-Off",
+                f"A distância de Lift-Off é calculada automaticamente conforme a geometria dos componentes selecionados ({last_calc:.2f} mm).\n\n"
+                f"Tem certeza que deseja alterar manualmente a distância para {val:.2f} mm?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No
+            )
+
+            if reply == QtWidgets.QMessageBox.Yes:
+                self.liftoff_manual_override = True
+            else:
+                self._ignore_spin_liftoff_signals = True
+                self.spin_liftoff_dist.setValue(last_calc)
+                self._ignore_spin_liftoff_signals = False
 
     def atualizar_card_especificacoes_bobina(self, info):
         d_wind = info.get('diameter_winding_mm', info['diameter_mm'])
@@ -4105,6 +4468,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     def reorganizar_grid_widgets(self, grid_layout, widgets_list, num_cols):
         if not grid_layout or not widgets_list:
             return
+        if num_cols < 1:
+            num_cols = 1
+        if getattr(grid_layout, '_current_cols', None) == num_cols:
+            return
+        grid_layout._current_cols = num_cols
+
         for i in reversed(range(grid_layout.count())):
             item = grid_layout.takeAt(i)
             if item and item.widget():
@@ -4126,39 +4495,94 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         grid_layout.setColumnStretch(num_cols, 1)
 
-    def obter_num_colunas_seletores_atual(self):
-        if hasattr(self, 'combo_num_colunas_painel'):
-            txt = self.combo_num_colunas_painel.currentText()
+        parent_w = grid_layout.parentWidget()
+        if parent_w:
+            parent_w.updateGeometry()
+            parent_w.adjustSize()
+            parent_w.setVisible(True)
+            parent_w.show()
+
+    def calcular_num_colunas_auto(self, widgets_list, grid_layout, pos=None):
+        """
+        Calcula o número ideal de colunas para cada campo individualmente
+        com base na largura real do menu lateral (pos ou scroll_coil.viewport).
+        """
+        if not widgets_list:
+            return 3
+
+        avail_w = 0
+        if pos is not None and isinstance(pos, int) and pos > 50:
+            avail_w = pos - 130
+        elif hasattr(self, 'scroll_coil') and self.scroll_coil and self.scroll_coil.viewport().width() > 50:
+            avail_w = self.scroll_coil.viewport().width() - 130
+        elif hasattr(self, 'splitter_tab_coil') and self.splitter_tab_coil and self.splitter_tab_coil.sizes()[0] > 50:
+            avail_w = self.splitter_tab_coil.sizes()[0] - 130
+
+        if avail_w <= 50:
+            return 1
+
+        max_item_w = 0
+        fm = QtGui.QFontMetrics(widgets_list[0].font())
+        for w in widgets_list:
+            if hasattr(w, 'text') and w.text():
+                w_needed = fm.horizontalAdvance(w.text()) + 28
+                if w_needed > max_item_w:
+                    max_item_w = w_needed
+
+        if max_item_w <= 0:
+            max_item_w = 90
+
+        cols = max(1, avail_w // max_item_w)
+        return min(cols, len(widgets_list))
+
+    def obter_num_colunas_para_grid(self, grid_layout, widgets_list, pos=None, is_sensor_grid=False):
+        combo = getattr(self, 'combo_num_colunas_bobinas' if is_sensor_grid else 'combo_num_colunas_painel', None)
+        if combo:
+            txt = combo.currentText()
             if "1" in txt:
                 return 1
             elif "2" in txt:
                 return 2
+            elif "3" in txt:
+                return 3
             elif "4" in txt:
                 return 4
-        return 3
+            elif "5" in txt:
+                return 5
+        return self.calcular_num_colunas_auto(widgets_list, grid_layout, pos=pos)
 
-    def reorganizar_colunas_seletores_caracterizacao(self):
-        n_cols = self.obter_num_colunas_seletores_atual()
+    def reorganizar_colunas_seletores_caracterizacao(self, pos=None, index=None):
+        if hasattr(self, 'combo_num_colunas_bobinas') and "Auto" not in self.combo_num_colunas_bobinas.currentText():
+            if hasattr(self, 'layout_radio_bobinas'):
+                self.layout_radio_bobinas._current_cols = None
 
-        if hasattr(self, 'lista_widgets_radio_bobinas') and hasattr(self, 'layout_radio_bobinas'):
+        if hasattr(self, 'combo_num_colunas_painel') and "Auto" not in self.combo_num_colunas_painel.currentText():
+            for grid_attr in ['layout_spacers_grid', 'layout_mat_grid', 'layout_cls_grid', 'layout_locais_grid', 'layout_num_amostras_grid']:
+                if hasattr(self, grid_attr):
+                    getattr(self, grid_attr)._current_cols = None
+
+        if hasattr(self, 'lista_widgets_radio_bobinas') and hasattr(self, 'layout_radio_bobinas') and self.lista_widgets_radio_bobinas:
+            n_cols = self.obter_num_colunas_para_grid(self.layout_radio_bobinas, self.lista_widgets_radio_bobinas, pos=pos, is_sensor_grid=True)
             self.reorganizar_grid_widgets(self.layout_radio_bobinas, self.lista_widgets_radio_bobinas, n_cols)
 
-        if hasattr(self, 'lista_widgets_berco') and hasattr(self, 'layout_berco_grid'):
-            self.reorganizar_grid_widgets(self.layout_berco_grid, self.lista_widgets_berco, n_cols)
-
-        if hasattr(self, 'lista_widgets_spacers') and hasattr(self, 'layout_spacers_grid'):
+        if hasattr(self, 'lista_widgets_spacers') and hasattr(self, 'layout_spacers_grid') and self.lista_widgets_spacers:
+            n_cols = self.obter_num_colunas_para_grid(self.layout_spacers_grid, self.lista_widgets_spacers, pos=pos, is_sensor_grid=False)
             self.reorganizar_grid_widgets(self.layout_spacers_grid, self.lista_widgets_spacers, n_cols)
 
-        if hasattr(self, 'lista_widgets_materiais') and hasattr(self, 'layout_mat_grid'):
+        if hasattr(self, 'lista_widgets_materiais') and hasattr(self, 'layout_mat_grid') and self.lista_widgets_materiais:
+            n_cols = self.obter_num_colunas_para_grid(self.layout_mat_grid, self.lista_widgets_materiais, pos=pos, is_sensor_grid=False)
             self.reorganizar_grid_widgets(self.layout_mat_grid, self.lista_widgets_materiais, n_cols)
 
-        if hasattr(self, 'lista_widgets_classes') and hasattr(self, 'layout_cls_grid'):
+        if hasattr(self, 'lista_widgets_classes') and hasattr(self, 'layout_cls_grid') and self.lista_widgets_classes:
+            n_cols = self.obter_num_colunas_para_grid(self.layout_cls_grid, self.lista_widgets_classes, pos=pos, is_sensor_grid=False)
             self.reorganizar_grid_widgets(self.layout_cls_grid, self.lista_widgets_classes, n_cols)
 
-        if hasattr(self, 'lista_widgets_locais') and hasattr(self, 'layout_locais_grid'):
+        if hasattr(self, 'lista_widgets_locais') and hasattr(self, 'layout_locais_grid') and self.lista_widgets_locais:
+            n_cols = self.obter_num_colunas_para_grid(self.layout_locais_grid, self.lista_widgets_locais, pos=pos, is_sensor_grid=False)
             self.reorganizar_grid_widgets(self.layout_locais_grid, self.lista_widgets_locais, n_cols)
 
-        if hasattr(self, 'lista_widgets_num_amostras') and hasattr(self, 'layout_num_amostras_grid'):
+        if hasattr(self, 'lista_widgets_num_amostras') and hasattr(self, 'layout_num_amostras_grid') and self.lista_widgets_num_amostras:
+            n_cols = self.obter_num_colunas_para_grid(self.layout_num_amostras_grid, self.lista_widgets_num_amostras, pos=pos, is_sensor_grid=False)
             self.reorganizar_grid_widgets(self.layout_num_amostras_grid, self.lista_widgets_num_amostras, n_cols)
 
     def obter_num_amostras_selecionado(self):
@@ -4263,6 +4687,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         local_sel = self.obter_locais_amostra_selecionados()
         target_n = self.obter_num_amostras_selecionado()
 
+        manual_flag = getattr(self, 'liftoff_manual_override', False)
         if target_n == 1:
             try:
                 filepath = self.coil_manager.save_characterization_record(
@@ -4274,7 +4699,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     classe=classe,
                     dt_us=self.dt_us,
                     curves=list(self.last_valores),
-                    local=local_sel
+                    local=local_sel,
+                    ajuste_manual_liftoff=manual_flag
                 )
 
                 rec = self.coil_manager.read_characterization_csv(filepath)
@@ -4289,7 +4715,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
                 QtWidgets.QMessageBox.information(
                     self, "Ensaio Gravado",
-                    f"Ensaio de caracterização com 1 amostra gravado com sucesso!\n\nLocal: {local_sel}\nArquivo:\n{os.path.basename(filepath)}"
+                    f"Ensaio de caracterização com 1 amostra gravado com sucesso!\n\nLocal: {local_sel}\nAjuste Manual Lift-Off: {'Sim' if manual_flag else 'Não'}\nArquivo:\n{os.path.basename(filepath)}"
                 )
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Erro ao Gravar", f"Erro ao gravar arquivo de caracterização: {e}")
@@ -4303,6 +4729,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 self.coil_recording_material = material
                 self.coil_recording_classe = classe
                 self.coil_recording_local = local_sel
+                self.coil_recording_manual_liftoff = manual_flag
                 self.is_recording_coil_multisample = True
                 
                 self.btn_record_coil_test.setEnabled(False)
@@ -4326,7 +4753,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     classe=classe,
                     dt_us=self.dt_us,
                     curves=curves_to_save,
-                    local=local_sel
+                    local=local_sel,
+                    ajuste_manual_liftoff=manual_flag
                 )
 
                 rec = self.coil_manager.read_characterization_csv(filepath)
@@ -4341,7 +4769,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
                 QtWidgets.QMessageBox.information(
                     self, "Ensaio Gravado",
-                    f"Ensaio de {target_n} amostras gravado com sucesso no mesmo arquivo CSV!\n\nLocal: {local_sel}\nArquivo:\n{os.path.basename(filepath)}"
+                    f"Ensaio de {target_n} amostras gravado com sucesso no mesmo arquivo CSV!\n\nLocal: {local_sel}\nAjuste Manual Lift-Off: {'Sim' if manual_flag else 'Não'}\nArquivo:\n{os.path.basename(filepath)}"
                 )
 
     def finalizar_gravacao_multiamostras_caracterizacao(self):
@@ -4355,7 +4783,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 classe=self.coil_recording_classe,
                 dt_us=self.dt_us,
                 curves=self.coil_recording_buffer,
-                local=getattr(self, 'coil_recording_local', 'Não Especificado')
+                local=getattr(self, 'coil_recording_local', 'Não Especificado'),
+                ajuste_manual_liftoff=getattr(self, 'coil_recording_manual_liftoff', False)
             )
 
             rec = self.coil_manager.read_characterization_csv(filepath)
@@ -4440,11 +4869,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Cores para curvas
         paleta_cores = ["#00e676", "#29b6f6", "#ab47bc", "#ffca28", "#ff7043", "#ec407a", "#26a69a", "#78909c", "#e040fb", "#18ffff"]
         
-        # 1. Plotar Curvas Transientes V(t)
+        # 1. Plotar Curvas Transientes V(t) usando as cores padronizadas por Classe de Corrosão
         for idx, rec in enumerate(recs_para_plotar):
-            cor = paleta_cores[idx % len(paleta_cores)]
+            cor = obter_cor_classe(rec.get("classe", "Saudável"))
             t_us = np.arange(len(rec["curva"])) * rec["dt_us"]
-            label = f"B.{rec['id_bobina']} ({rec['distancia_mm']}mm, {rec['material']})"
+            label = f"B.{rec['id_bobina']} ({rec['distancia_mm']}mm, {rec['material']}, {rec['classe']})"
             
             # Se o CSV possui multi-amostras, plota curvas individuais translúcidas de fundo
             all_curves = rec.get("all_curves", [])
@@ -4465,11 +4894,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 grupos[key] = []
             grupos[key].append(rec)
 
+        use_id_shading = hasattr(self, 'chk_diferenciar_ids_tonalidade') and self.chk_diferenciar_ids_tonalidade.isChecked()
+
         relatorio_txt = ["==========================================================================",
                          "RELATÓRIO DE CARACTERIZAÇÃO DE BOBINAS & ENSAIOS DE LIFT-OFF",
                          "=========================================================================="]
 
         for idx, (key, g_recs) in enumerate(grupos.items()):
+            b_id, mat_name, cls_name = key
             # Ordena por distância crescente
             g_recs_sorted = sorted(g_recs, key=lambda x: x["distancia_mm"])
             dists = [r["distancia_mm"] for r in g_recs_sorted]
@@ -4477,33 +4909,63 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             aucs = [r["auc"] for r in g_recs_sorted]
             l_efetivas = [r["l_efetiva_uh"] for r in g_recs_sorted]
 
-            cor = paleta_cores[idx % len(paleta_cores)]
-            pen_mean = pg.mkPen(color=cor, width=2.5, style=QtCore.Qt.DashLine)
-            symbol_pen = pg.mkPen(color=cor)
+            cor_base = obter_cor_classe(cls_name)
+            simbolo = obter_simbolo_material(mat_name)
+            pen_mean = pg.mkPen(color=cor_base, width=2.5, style=QtCore.Qt.DashLine)
+            symbol_pen = pg.mkPen(color=cor_base)
 
-            label = f"Bobina {key[0]} | {key[1]} ({key[2]})"
+            label = f"Bobina {b_id} | {mat_name} ({cls_name})"
 
-            # 2.1 Plotar todos os pontos individuais de cada arquivo (Scatter Plot de Dispersão Total)
+            ids_unicos = sorted(list(set([str(r.get("id_amostra", "1")) for r in g_recs_sorted])))
+            num_ids = len(ids_unicos)
+            id_to_lightness = {id_v: (0.35 + 0.50 * (i / max(1, num_ids - 1)) if num_ids > 1 else 0.55) for i, id_v in enumerate(ids_unicos)}
+
+            # 2.1 Plotar todos os pontos individuais de cada arquivo (Scatter Plot com símbolos e cores padronizados)
             for r in g_recs_sorted:
                 d_val = r["distancia_mm"]
+                id_str = str(r.get("id_amostra", "1"))
                 all_t = r.get("all_taus", [r["tau"]])
                 all_a = r.get("all_aucs", [r["auc"]])
                 all_l = r.get("all_l_efetivas", [r["l_efetiva_uh"]])
 
                 d_pts = [d_val] * len(all_t)
-                c_qcolor = QtGui.QColor(cor)
-                c_qcolor.setAlpha(130)
-                brush_scatter = pg.mkBrush(c_qcolor)
 
-                # Plota todos os pontos das amostras do CSV
-                self.plot_coil_tau_liftoff.plot(d_pts, all_t, pen=None, symbol='o', symbolSize=6, symbolBrush=brush_scatter, symbolPen=None)
-                self.plot_coil_auc_liftoff.plot(d_pts, all_a, pen=None, symbol='s', symbolSize=6, symbolBrush=brush_scatter, symbolPen=None)
-                self.plot_coil_l_liftoff.plot(d_pts, all_l, pen=None, symbol='d', symbolSize=6, symbolBrush=brush_scatter, symbolPen=None)
+                base_qcol = QtGui.QColor(cor_base)
+                h, s, l_val, a_alpha = base_qcol.getHslF()
+                target_l = id_to_lightness.get(id_str, 0.55)
+                adj_qcol = QtGui.QColor.fromHslF(h, min(1.0, s * 1.05), max(0.25, min(0.90, target_l)))
+                adj_qcol.setAlpha(150)
+                brush_scatter = pg.mkBrush(adj_qcol)
+
+                self.plot_coil_tau_liftoff.plot(d_pts, all_t, pen=None, symbol=simbolo, symbolSize=7, symbolBrush=brush_scatter, symbolPen=None)
+                self.plot_coil_auc_liftoff.plot(d_pts, all_a, pen=None, symbol=simbolo, symbolSize=7, symbolBrush=brush_scatter, symbolPen=None)
+                self.plot_coil_l_liftoff.plot(d_pts, all_l, pen=None, symbol=simbolo, symbolSize=7, symbolBrush=brush_scatter, symbolPen=None)
 
             # 2.2 Plotar a linha média conectando as distâncias da série
-            self.plot_coil_tau_liftoff.plot(dists, taus, pen=pen_mean, symbol='o', symbolSize=9, symbolBrush=cor, symbolPen=symbol_pen, name=label)
-            self.plot_coil_auc_liftoff.plot(dists, aucs, pen=pen_mean, symbol='s', symbolSize=9, symbolBrush=cor, symbolPen=symbol_pen, name=label)
-            self.plot_coil_l_liftoff.plot(dists, l_efetivas, pen=pen_mean, symbol='d', symbolSize=9, symbolBrush=cor, symbolPen=symbol_pen, name=label)
+            self.plot_coil_tau_liftoff.plot(dists, taus, pen=pen_mean, symbol=simbolo, symbolSize=16, symbolBrush=cor_base, symbolPen=symbol_pen, name=label)
+            self.plot_coil_auc_liftoff.plot(dists, aucs, pen=pen_mean, symbol=simbolo, symbolSize=16, symbolBrush=cor_base, symbolPen=symbol_pen, name=label)
+            self.plot_coil_l_liftoff.plot(dists, l_efetivas, pen=pen_mean, symbol=simbolo, symbolSize=16, symbolBrush=cor_base, symbolPen=symbol_pen, name=label)
+
+            # 2.3 Exibir o ID de cada amostra em preto pequeno centralizado dentro da forma
+            font_id_coil = QtGui.QFont("Segoe UI", 7, QtGui.QFont.Bold)
+            for r in g_recs_sorted:
+                id_txt = str(r.get("id_amostra", ""))
+                d_val = r["distancia_mm"]
+
+                txt_tau = pg.TextItem(text=id_txt, color=(0, 0, 0), anchor=(0.5, 0.5))
+                txt_tau.setFont(font_id_coil)
+                txt_tau.setPos(d_val, r["tau"])
+                self.plot_coil_tau_liftoff.addItem(txt_tau)
+
+                txt_auc = pg.TextItem(text=id_txt, color=(0, 0, 0), anchor=(0.5, 0.5))
+                txt_auc.setFont(font_id_coil)
+                txt_auc.setPos(d_val, r["auc"])
+                self.plot_coil_auc_liftoff.addItem(txt_auc)
+
+                txt_l = pg.TextItem(text=id_txt, color=(0, 0, 0), anchor=(0.5, 0.5))
+                txt_l.setFont(font_id_coil)
+                txt_l.setPos(d_val, r["l_efetiva_uh"])
+                self.plot_coil_l_liftoff.addItem(txt_l)
 
             # Gera dados para o console de relatório
             relatorio_txt.append(f"\n>>> SERIE: Bobina {key[0]} | Material: {key[1]} | Classe: {key[2]}")
@@ -4562,6 +5024,196 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             )
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Erro ao Exportar", f"Erro durante a exportação:\n{str(e)}")
+
+    def ao_mudar_subaba_caracterizacao(self, index):
+        if index == 0:
+            self.atualizar_graficos_comparacao_bobinas()
+        elif index == 1:
+            self.atualizar_graficos_tempo_real_caracterizacao()
+        elif index == 2:
+            self.atualizar_graficos_estatistica_caracterizacao()
+
+    def atualizar_graficos_tempo_real_caracterizacao(self):
+        if not hasattr(self, 'plot_coil_rt_live'):
+            return
+
+        self.plot_coil_rt_live.clear()
+        self.plot_coil_rt_overlay.clear()
+        self.plot_coil_rt_residual.clear()
+
+        # Plota os dados em tempo real coletados na aba principal (se existirem)
+        if hasattr(self, 'tempo_us') and hasattr(self, 'tensao_mv') and len(self.tempo_us) > 0:
+            t = np.array(self.tempo_us)
+            v = np.array(self.tensao_mv)
+
+            # Plot 1: Osciloscópio Live
+            pen_live = pg.mkPen(color='#00e676', width=2.0)
+            self.plot_coil_rt_live.plot(t, v, pen=pen_live, name="Sinal Medido (Live)")
+
+            # Plot 2: Sobreposição Live vs Curva de Referência do Sensor Ativo
+            self.plot_coil_rt_overlay.plot(t, v, pen=pen_live, name="Live")
+
+            # Busca curva de referência da bobina ativa se houver registros carregados
+            active_info = getattr(self, 'active_coil_info', {})
+            active_id = active_info.get("id", "681")
+            
+            ref_curve = None
+            if hasattr(self, 'loaded_coil_records') and self.loaded_coil_records:
+                matches = [r for r in self.loaded_coil_records if str(r.get("id_bobina", "")) == str(active_id)]
+                if matches:
+                    ref_curve = matches[0].get("curva", None)
+
+            if ref_curve is not None:
+                n_pts = min(len(v), len(ref_curve))
+                t_sub = t[:n_pts]
+                v_live_sub = v[:n_pts]
+                v_ref_sub = np.array(ref_curve[:n_pts])
+
+                pen_ref = pg.mkPen(color='#29b6f6', width=2.0, style=QtCore.Qt.DashLine)
+                self.plot_coil_rt_overlay.plot(t_sub, v_ref_sub, pen=pen_ref, name=f"Ref. B.{active_id}")
+
+                # Plot 3: Sinal Residual Delta V(t)
+                delta_v = v_live_sub - v_ref_sub
+                pen_res = pg.mkPen(color='#f1c40f', width=1.5)
+                self.plot_coil_rt_residual.plot(t_sub, delta_v, pen=pen_res, name="Delta V(t)")
+                
+                rms_err = float(np.sqrt(np.mean(delta_v**2)))
+                status_txt = "<b style='color:#00e676;'>ESTÁVEL (Conforme Ref.)</b>" if rms_err < 150 else "<b style='color:#e74c3c;'>ATENÇÃO: Desvio Térmico / Alinhamento</b>"
+
+                self.txt_coil_rt_report.setHtml(
+                    f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
+                    f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')})<br>"
+                    f"<b>Desvio Médio RMS (Resíduo):</b> {rms_err:.2f} ADC Counts<br>"
+                    f"<b>Status de Estabilidade:</b> {status_txt}<br>"
+                    f"<small style='color:#a0a0a0;'>Gráficos atualizados continuamente via interface de aquisição USB/COM.</small>"
+                )
+            else:
+                self.txt_coil_rt_report.setHtml(
+                    f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
+                    f"<b>Sinal Live Capturado:</b> {len(v)} pontos de amostragem.<br>"
+                    f"<small style='color:#a0a0a0;'>Importe ou grave um ensaio de caracterização para habilitação da curva de referência e cálculo de resíduo Delta V(t).</small>"
+                )
+        else:
+            self.txt_coil_rt_report.setHtml(
+                "<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
+                "<i>Aguardando início de aquisição serial em tempo real...</i>"
+            )
+
+    def atualizar_graficos_estatistica_caracterizacao(self):
+        if not hasattr(self, 'plot_coil_st_decay'):
+            return
+
+        self.plot_coil_st_decay.clear()
+        self.plot_coil_st_tau.clear()
+        self.plot_coil_st_auc.clear()
+        self.plot_coil_st_scatter.clear()
+
+        recs = getattr(self, 'loaded_coil_records', [])
+        selected_items = self.list_imported_coil_files.selectedItems()
+        if selected_items:
+            sel_recs = [item.data(QtCore.Qt.UserRole) for item in selected_items if item.data(QtCore.Qt.UserRole)]
+            if sel_recs:
+                recs = sel_recs
+
+        if not recs:
+            self.txt_coil_st_report.setText("Nenhum registro de caracterização carregado para análise estatística.")
+            return
+
+        # Verifica se o checkbox de tonalidades por ID está ativo
+        use_id_shading = hasattr(self, 'chk_diferenciar_ids_tonalidade') and self.chk_diferenciar_ids_tonalidade.isChecked()
+
+        # Extrai todas as amostras individuais dos arquivos importados
+        self.records_estatistica_caracterizacao = []
+        for r in recs:
+            b_id = str(r.get("id_bobina", "N/A"))
+            d_val = float(r.get("distancia_mm", 0.0))
+            mat = str(r.get("material", "A36 Comum"))
+            cls_name = str(r.get("classe", "Saudável"))
+
+            all_t = r.get("all_taus", [r["tau"]])
+            all_a = r.get("all_aucs", [r["auc"]])
+            all_l = r.get("all_l_efetivas", [r["l_efetiva_uh"]])
+
+            n_pts = min(len(all_t), len(all_a), len(all_l))
+            for i in range(n_pts):
+                id_samp = str(r.get("id_amostra", f"{i+1}"))
+                self.records_estatistica_caracterizacao.append({
+                    "id_bobina": b_id,
+                    "distancia_mm": d_val,
+                    "material": mat,
+                    "classe": cls_name,
+                    "tau": float(all_t[i]),
+                    "auc": float(all_a[i]),
+                    "l_efetiva_uh": float(all_l[i]),
+                    "id": id_samp,
+                    "curva": r.get("curva", []),
+                    "dt_us": r.get("dt_us", 0.1)
+                })
+
+        # Mapeia tonalidade por ID e aplica cores/símbolos padronizados por Material e Classe
+        if self.records_estatistica_caracterizacao:
+            ids_unicos = sorted(list(set([str(a["id"]) for a in self.records_estatistica_caracterizacao])))
+            num_ids = len(ids_unicos)
+            id_to_lightness = {id_v: (0.35 + 0.50 * (i / max(1, num_ids - 1)) if num_ids > 1 else 0.55) for i, id_v in enumerate(ids_unicos)}
+
+            for a_item in self.records_estatistica_caracterizacao:
+                cor_base = obter_cor_classe(a_item["classe"])
+                simbolo = obter_simbolo_material(a_item["material"])
+                a_item["symbol"] = simbolo
+
+                base_qcol = QtGui.QColor(cor_base)
+                if use_id_shading:
+                    h, s, l_val, a_alpha = base_qcol.getHslF()
+                    target_l = id_to_lightness.get(str(a_item["id"]), 0.55)
+                    adj_qcol = QtGui.QColor.fromHslF(h, min(1.0, s * 1.05), max(0.25, min(0.90, target_l)))
+                    a_item["color_hex"] = adj_qcol.name()
+                    a_item["brush"] = pg.mkBrush(adj_qcol)
+                else:
+                    a_item["color_hex"] = cor_base
+                    a_item["brush"] = pg.mkBrush(base_qcol)
+
+        # Plot 1: Envoltória Média
+        for idx, r in enumerate(recs):
+            cor = obter_cor_classe(r.get("classe", "Saudável"))
+            t_us = np.arange(len(r["curva"])) * r.get("dt_us", 0.1)
+            self.plot_coil_st_decay.plot(t_us, r["curva"], pen=pg.mkPen(color=cor, width=2.0), name=f"B.{r.get('id_bobina','')} ({r.get('distancia_mm',0)}mm, {r.get('material','')})")
+
+        # Plot 2, 3, 4: Tau, AUC e Scatter usando símbolos por material e pincéis por classe/tonalidade
+        for a in self.records_estatistica_caracterizacao:
+            d_val = a["distancia_mm"]
+            t_val = a["tau"]
+            a_val = a["auc"]
+            simb = a.get("symbol", "o")
+            brush_pt = a.get("brush", pg.mkBrush("#3498db"))
+
+            self.plot_coil_st_tau.plot([d_val], [t_val], pen=None, symbol=simb, symbolSize=9, symbolBrush=brush_pt, symbolPen=pg.mkPen('w', width=0.4))
+            self.plot_coil_st_auc.plot([d_val], [a_val], pen=None, symbol=simb, symbolSize=9, symbolBrush=brush_pt, symbolPen=pg.mkPen('w', width=0.4))
+            self.plot_coil_st_scatter.plot([t_val], [a_val], pen=None, symbol=simb, symbolSize=10, symbolBrush=brush_pt, symbolPen=pg.mkPen('w', width=0.4))
+
+        taus = [a["tau"] for a in self.records_estatistica_caracterizacao]
+        aucs = [a["auc"] for a in self.records_estatistica_caracterizacao]
+
+        m_tau, s_tau = np.mean(taus), np.std(taus)
+        m_auc, s_auc = np.mean(aucs), np.std(aucs)
+
+        report = [
+            f"<h3>=== Estatística de Caracterização dos Sensores ===</h3>",
+            f"<b>Total de Amostras Processadas:</b> {len(self.records_estatistica_caracterizacao)}<br>",
+            f"<b>Constante de Tempo Tau (&mu;s):</b> {m_tau:.3f} &plusmn; {s_tau:.3f} (CV: {(s_tau/m_tau*100 if m_tau>0 else 0):.2f}%)<br>",
+            f"<b>Área Sob a Curva AUC:</b> {m_auc:.1f} &plusmn; {s_auc:.1f} (CV: {(s_auc/m_auc*100 if m_auc>0 else 0):.2f}%)<br>"
+        ]
+        if use_id_shading:
+            report.append("<small style='color:#00e676;'>🎨 Diferenciação HSL por ID da Amostra Ativada.</small>")
+
+        self.txt_coil_st_report.setHtml("".join(report))
+
+    def ao_mover_mouse_grafico_estatistico_caracterizacao(self, pos):
+        pass
+
+    def ao_validar_limite_id_amostra(self, text):
+        if len(text) >= 3:
+            pos = self.edit_coil_sample_id.mapToGlobal(QtCore.QPoint(0, self.edit_coil_sample_id.height()))
+            QtWidgets.QToolTip.showText(pos, "⚠️ Limite atingido: O ID da amostra possui no máximo 3 caracteres (ex: 001, 012).", self.edit_coil_sample_id)
 
 
 # =====================================================================

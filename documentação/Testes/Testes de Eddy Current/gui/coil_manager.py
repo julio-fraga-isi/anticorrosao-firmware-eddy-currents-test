@@ -3,6 +3,90 @@ import csv
 import io
 import json
 from datetime import datetime
+
+# Mapeamentos bidirecionais de códigos de 2 caracteres para a padronização simplificada de nomes de arquivos
+MAPA_CODIGOS_MATERIAL = {
+    "CO": "A36 Comum",
+    "GE": "A36 GE",
+    "GF": "A36 GF",
+    "ET": "Estrutura Torre",
+    "AL": "Ar Livre"
+}
+MAPA_NOMES_MATERIAL = {
+    "A36 COMUM": "CO", "COMUM": "CO", "CO": "CO",
+    "A36 GE": "GE", "GE": "GE",
+    "A36 GF": "GF", "GF": "GF",
+    "ESTRUTURA TORRE": "ET", "TORRE": "ET", "ET": "ET",
+    "AR LIVRE": "AL", "AL": "AL"
+}
+
+MAPA_CODIGOS_CLASSE = {
+    "SA": "Saudável",
+    "LE": "Leve",
+    "MO": "Moderada",
+    "AV": "Avançada",
+    "CO": "Corroído",
+    "AL": "Ar Livre"
+}
+MAPA_NOMES_CLASSE = {
+    "SAUDÁVEL": "SA", "SAUDAVEL": "SA", "SA": "SA",
+    "LEVE": "LE", "LE": "LE",
+    "MODERADA": "MO", "MODERADO": "MO", "MO": "MO",
+    "AVANÇADA": "AV", "AVANCADA": "AV", "AVANÇADO": "AV", "AVANCADO": "AV", "AV": "AV",
+    "CORROÍDO": "CO", "CORROIDO": "CO", "CO": "CO",
+    "AR LIVRE": "AL", "AL": "AL"
+}
+
+MAPA_CODIGOS_LOCAL = {
+    "SP": "São Paulo",
+    "CE": "Ceará",
+    "VE": "Venâncio",
+    "CA": "Caxias",
+    "RO": "Rosário",
+    "SE": "SENAI",
+    "BR": "Branco",
+    "NE": "Não Especificado"
+}
+MAPA_NOMES_LOCAL = {
+    "SÃO PAULO": "SP", "SAO PAULO": "SP", "SP": "SP",
+    "CEARÁ": "CE", "CEARA": "CE", "CE": "CE",
+    "VENÂNCIO": "VE", "VENANCIO": "VE", "VE": "VE",
+    "CAXIAS": "CA", "CA": "CA",
+    "ROSÁRIO": "RO", "ROSARIO": "RO", "RO": "RO",
+    "SENAI": "SE", "SE": "SE",
+    "BRANCO": "BR", "BR": "BR",
+    "NÃO ESPECIFICADO": "NE", "NAO ESPECIFICADO": "NE", "NE": "NE"
+}
+
+def converter_material_para_codigo(mat_nome):
+    if not mat_nome: return "CO"
+    raw = str(mat_nome).strip().upper()
+    return MAPA_NOMES_MATERIAL.get(raw, "CO")
+
+def converter_codigo_para_material(cod):
+    if not cod: return "A36 Comum"
+    cod_upper = str(cod).strip().upper()
+    return MAPA_CODIGOS_MATERIAL.get(cod_upper, "A36 Comum")
+
+def converter_classe_para_codigo(cls_nome):
+    if not cls_nome: return "SA"
+    raw = str(cls_nome).strip().upper()
+    return MAPA_NOMES_CLASSE.get(raw, "SA")
+
+def converter_codigo_para_classe(cod):
+    if not cod: return "Saudável"
+    cod_upper = str(cod).strip().upper()
+    return MAPA_CODIGOS_CLASSE.get(cod_upper, "Saudável")
+
+def converter_local_para_codigo(loc_nome):
+    if not loc_nome: return "NE"
+    raw = str(loc_nome).strip().upper()
+    return MAPA_NOMES_LOCAL.get(raw, "NE")
+
+def converter_codigo_para_local(cod):
+    if not cod: return "Não Especificado"
+    cod_upper = str(cod).strip().upper()
+    return MAPA_CODIGOS_LOCAL.get(cod_upper, "Não Especificado")
 import numpy as np
 from PyQt5 import QtCore, QtWidgets, QtGui
 
@@ -105,7 +189,8 @@ DEFAULT_COILS = {
 class CoilCharacterizationManager:
     def __init__(self, base_dir=None):
         if base_dir is None:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
+            gui_dir = os.path.dirname(os.path.abspath(__file__))
+            base_dir = os.path.abspath(os.path.join(gui_dir, ".."))
         self.base_dir = base_dir
         self.config_filepath = os.path.join(self.base_dir, "bobinas_cadastradas.json")
         self.coils = {}
@@ -113,17 +198,14 @@ class CoilCharacterizationManager:
 
     def load_coils_from_json(self):
         """
-        Carrega as bobinas do arquivo JSON local ou força sincronização com DEFAULT_COILS.
+        Carrega as bobinas do arquivo JSON oficial ou inicializa com DEFAULT_COILS caso o arquivo não exista.
         """
         if os.path.exists(self.config_filepath):
             try:
                 with open(self.config_filepath, "r", encoding="utf-8") as f:
                     self.coils = json.load(f)
-                for k, v in DEFAULT_COILS.items():
-                    if k not in self.coils:
-                        self.coils[k] = v
-                self.save_coils_to_json()
-            except Exception:
+            except Exception as e:
+                print(f"Erro ao carregar {self.config_filepath}: {e}. Inicializando padrão.")
                 self.coils = dict(DEFAULT_COILS)
                 self.save_coils_to_json()
         else:
@@ -177,7 +259,7 @@ class CoilCharacterizationManager:
     def get_all_coils(self):
         return self.coils
 
-    def generate_standard_filename(self, coil_id, distance_mm, material, classe, local="Não Especificado", timestamp=None):
+    def generate_standard_filename(self, id_amostra, coil_id, distance_mm, material, classe, local="Não Especificado", timestamp=None):
         if timestamp is None:
             ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         else:
@@ -187,19 +269,32 @@ class CoilCharacterizationManager:
             except Exception:
                 ts_str = timestamp.replace("-", "").replace(":", "").replace(" ", "_")
 
-        coil_info = self.get_coil_info(coil_id)
-        d_str = f"{coil_info['diameter_mm']:.1f}" if coil_info else "0"
-        l_str = f"{coil_info['height_mm']:.1f}" if coil_info else "0"
-        
-        mat_clean = material.replace(" ", "_")
-        cls_clean = classe.replace(" ", "_")
-        loc_clean = local.replace(" ", "_").replace(",", "-") if local else "Geral"
+        # Formata ID Amostra (max 3 chars, ex: 001)
+        s_id = str(id_amostra).strip()
+        if len(s_id) > 3:
+            s_id = s_id[:3]
+        elif s_id.isdigit():
+            s_id = f"{int(s_id):03d}"
+
+        # Formata ID Bobina (max 3 chars, ex: 681)
+        c_id = str(coil_id).strip()
+        if len(c_id) > 3:
+            c_id = c_id[:3]
+        elif c_id.isdigit():
+            c_id = f"{int(c_id):03d}"
+
+        # Formata Distância (max 4 chars + mm, ex: 10.9mm ou 0mm)
         dist_str = f"{float(distance_mm):.1f}"
 
-        filename = f"ensaio_bobina_{coil_id}_d{d_str}_l{l_str}_dist_{dist_str}mm_{mat_clean}_{loc_clean}_{cls_clean}_{ts_str}.csv"
+        mat_code = converter_material_para_codigo(material)
+        cls_code = converter_classe_para_codigo(classe)
+        loc_code = converter_local_para_codigo(local)
+
+        # Padrão Simplificado Compacto: XXX-XXX-XXXXmm-XX-XX-XX-YYYYMMDD_HHMMSS.csv
+        filename = f"{s_id}-{c_id}-{dist_str}mm-{mat_code}-{cls_code}-{loc_code}-{ts_str}.csv"
         return filename
 
-    def save_characterization_record(self, output_dir, id_amostra, coil_info, distance_mm, material, classe, dt_us, curves, local="Não Especificado", timestamp=None):
+    def save_characterization_record(self, output_dir, id_amostra, coil_info, distance_mm, material, classe, dt_us, curves, local="Não Especificado", timestamp=None, ajuste_manual_liftoff=False):
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -213,6 +308,7 @@ class CoilCharacterizationManager:
 
         os.makedirs(output_dir, exist_ok=True)
         filename = self.generate_standard_filename(
+            id_amostra=id_amostra,
             coil_id=coil_info["id"],
             distance_mm=distance_mm,
             material=material,
@@ -225,7 +321,7 @@ class CoilCharacterizationManager:
         header = [
             "id_amostra", "local", "id_bobina", "indutancia_uh", "resistencia_ohm",
             "diametro_mm", "altura_mm", "espiras", "fio_awg", "nucleo",
-            "distancia_mm", "material", "classe", "timestamp", "dt_us"
+            "distancia_mm", "ajuste_manual_liftoff", "material", "classe", "timestamp", "dt_us"
         ] + [f"p_{i}" for i in range(256)]
 
         rows = []
@@ -243,6 +339,7 @@ class CoilCharacterizationManager:
                 coil_info["awg"],
                 coil_info["core"],
                 f"{float(distance_mm):.1f}",
+                "Sim" if ajuste_manual_liftoff else "Não",
                 material,
                 classe,
                 timestamp,
@@ -292,11 +389,12 @@ class CoilCharacterizationManager:
             diametro_mm = float(first_row[headers.index("diametro_mm")]) if "diametro_mm" in headers else 12.7
             altura_mm = float(first_row[headers.index("altura_mm")]) if "altura_mm" in headers else 10.9
             distancia_mm = float(first_row[headers.index("distancia_mm")]) if "distancia_mm" in headers else 0.0
+            ajuste_manual_liftoff = first_row[headers.index("ajuste_manual_liftoff")] if "ajuste_manual_liftoff" in headers else "Não"
             material = first_row[headers.index("material")] if "material" in headers else "Ar Livre"
             classe = normalizar_nome_classe(first_row[headers.index("classe")] if "classe" in headers else "Ar Livre")
             timestamp = first_row[headers.index("timestamp")] if "timestamp" in headers else ""
             dt_us = float(first_row[headers.index("dt_us")]) if "dt_us" in headers else 0.22656
-            p_start = headers.index("p_0") if "p_0" in headers else 14
+            p_start = headers.index("p_0") if "p_0" in headers else 15
         except Exception:
             return None
 
@@ -342,6 +440,7 @@ class CoilCharacterizationManager:
             "diametro_mm": diametro_mm,
             "altura_mm": altura_mm,
             "distancia_mm": distancia_mm,
+            "ajuste_manual_liftoff": ajuste_manual_liftoff,
             "material": material,
             "classe": classe,
             "timestamp": timestamp,
