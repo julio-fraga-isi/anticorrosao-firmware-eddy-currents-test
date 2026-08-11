@@ -3427,12 +3427,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         if elapsed_cycles > 0:
             dt = (elapsed_cycles / 480.0) / 256.0
             khz = 1000.0 / dt if dt > 0 else 0
-            self.lbl_dt_medido.setText(f"dt Real Medido: {dt:.5f} μs ({khz:.2f} kHz)")
-            
+            if hasattr(self, 'lbl_dt_medido'):
+                self.lbl_dt_medido.setText(f"dt Real Medido: {dt:.5f} μs ({khz:.2f} kHz)")
             self.dt_us = dt
 
         # Se a suavização de transiente estiver ativa, aplica média móvel ponto a ponto na curva
-        if self.chk_filtrar_curva.isChecked():
+        if hasattr(self, 'chk_filtrar_curva') and self.chk_filtrar_curva.isChecked() and hasattr(self, 'spin_janela_curva'):
             valores_processados = self.suavizar_curva(valores, self.spin_janela_curva.value())
         else:
             valores_processados = valores
@@ -3440,19 +3440,24 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.last_valores = valores_processados
         self.recent_curves.append(valores_processados)
 
+        # Atualiza self.tempo_us e self.tensao_mv para visualização em tempo real
+        self.tempo_us = np.arange(len(valores_processados)) * self.dt_us
+        self.tensao_mv = valores_processados
+
         # Coleta de multi-amostras em tempo real para a 5ª Aba (Caracterização de Bobinas)
         if getattr(self, 'is_recording_coil_multisample', False):
             self.coil_recording_buffer.append(list(valores_processados))
             cur_count = len(self.coil_recording_buffer)
-            target_count = self.coil_recording_target_n
-            self.btn_record_coil_test.setText(f"⏳ Coletando ({cur_count} / {target_count} amostras)...")
+            target_count = getattr(self, 'coil_recording_target_n', 1)
+            if hasattr(self, 'btn_record_coil_test'):
+                self.btn_record_coil_test.setText(f"⏳ Coletando ({cur_count} / {target_count} amostras)...")
             
             if cur_count >= target_count:
                 self.is_recording_coil_multisample = False
                 self.finalizar_gravacao_multiamostras_caracterizacao()
         
-        # Determina a curva a ser usada para a IA e o cálculo dos gráficos de decaimento (média móvel temporal se ativada)
-        if self.chk_salvar_media_movel.isChecked() and len(self.recent_curves) > 0:
+        # Determina a curva a ser usada para a IA e o cálculo dos gráficos de decaimento
+        if hasattr(self, 'chk_salvar_media_movel') and self.chk_salvar_media_movel.isChecked() and len(self.recent_curves) > 0:
             valores_ia = np.mean(list(self.recent_curves), axis=0).round().astype(int).tolist()
         else:
             valores_ia = valores_processados
@@ -3472,33 +3477,31 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Ajusta dinamicamente a escala Y de forma estável com histerese (evita piscadas por ruído)
         max_val = max(valores_processados) if len(valores_processados) > 0 else 0
         if max_val > 0:
-            # Sinal bruto
             target_limit_bruto = max_val * 1.15 + 5
-            if self.current_y_limit_bruto is None:
-                self.current_y_limit_bruto = target_limit_bruto
-                self.plot_bruto.setYRange(0, self.current_y_limit_bruto)
-            else:
-                # Só atualiza a escala se houver mudança maior que 15% (evita trepidação visual)
-                diff = abs(target_limit_bruto - self.current_y_limit_bruto) / self.current_y_limit_bruto
-                if diff > 0.15:
+            if hasattr(self, 'plot_bruto'):
+                if getattr(self, 'current_y_limit_bruto', None) is None:
                     self.current_y_limit_bruto = target_limit_bruto
                     self.plot_bruto.setYRange(0, self.current_y_limit_bruto)
+                else:
+                    diff = abs(target_limit_bruto - self.current_y_limit_bruto) / self.current_y_limit_bruto
+                    if diff > 0.15:
+                        self.current_y_limit_bruto = target_limit_bruto
+                        self.plot_bruto.setYRange(0, self.current_y_limit_bruto)
             
-            # Decaimento transiente (delta counts)
             max_decay = max(decay_adj) if len(decay_adj) > 0 else 0
             target_limit_decay = max_decay * 1.15 + 5
-            if self.current_y_limit_decay is None:
-                self.current_y_limit_decay = target_limit_decay
-                self.plot_decay.setYRange(0, self.current_y_limit_decay)
-            else:
-                # Só atualiza se houver mudança maior que 15% (evita trepidação visual)
-                diff_dec = abs(target_limit_decay - self.current_y_limit_decay) / self.current_y_limit_decay
-                if diff_dec > 0.15:
+            if hasattr(self, 'plot_decay'):
+                if getattr(self, 'current_y_limit_decay', None) is None:
                     self.current_y_limit_decay = target_limit_decay
                     self.plot_decay.setYRange(0, self.current_y_limit_decay)
+                else:
+                    diff_dec = abs(target_limit_decay - self.current_y_limit_decay) / self.current_y_limit_decay
+                    if diff_dec > 0.15:
+                        self.current_y_limit_decay = target_limit_decay
+                        self.plot_decay.setYRange(0, self.current_y_limit_decay)
         else:
-            self.plot_bruto.setYRange(0, 270)
-            self.plot_decay.setYRange(0, 270)
+            if hasattr(self, 'plot_bruto'): self.plot_bruto.setYRange(0, 270)
+            if hasattr(self, 'plot_decay'): self.plot_decay.setYRange(0, 270)
         
         # 4. Ajuste linear logarítmico para cálculo do tempo de decaimento (Tau)
         decay_log = np.clip(decay - offset, 1e-5, None)
@@ -3516,8 +3519,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.last_auc = auc
 
         # 4.5. Classificação Inteligente em tempo real
-        # Usa a média móvel configurável se estiver em modo contínuo e habilitado
-        if self.chk_auto_trigger.isChecked() and self.chk_ia_usa_media_movel.isChecked() and len(self.trend_tau) >= 3:
+        is_auto = hasattr(self, 'chk_auto_trigger') and self.chk_auto_trigger.isChecked()
+        is_ma = hasattr(self, 'chk_ia_usa_media_movel') and self.chk_ia_usa_media_movel.isChecked()
+        if is_auto and is_ma and hasattr(self, 'trend_tau') and len(self.trend_tau) >= 3:
             janela_val = min(len(self.trend_tau), self.spin_janela_ia.value())
             tau_para_classif = np.mean(list(self.trend_tau)[-janela_val:])
             auc_para_classif = np.mean(list(self.trend_auc)[-janela_val:])
@@ -3526,9 +3530,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             auc_para_classif = auc
 
         material_detectado, classe_detectada, confianca = self.classificar_leitura(tau_para_classif, auc_para_classif)
-        self.lbl_cls_material_val.setText(material_detectado)
-        self.lbl_cls_degrad_val.setText(classe_detectada)
-        self.lbl_cls_conf_val.setText(f"{confianca:.1f}%")
+        if hasattr(self, 'lbl_cls_material_val'): self.lbl_cls_material_val.setText(material_detectado)
+        if hasattr(self, 'lbl_cls_degrad_val'): self.lbl_cls_degrad_val.setText(classe_detectada)
+        if hasattr(self, 'lbl_cls_conf_val'): self.lbl_cls_conf_val.setText(f"{confianca:.1f}%")
         
         # Lógica de validação da IA (Aba 3)
         if hasattr(self, 'is_running_validation_test') and self.is_running_validation_test:
@@ -3536,33 +3540,28 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         # Define a cor do estado dependendo da classe detectada
         cor_classe = "#2ecc71" # Verde para saudável
-        if classe_detectada == "Leve":
-            cor_classe = "#27ae60"
-        elif classe_detectada == "Moderada":
-            cor_classe = "#f1c40f"
-        elif classe_detectada == "Avançada":
-            cor_classe = "#e67e22"
-        elif classe_detectada == "Corroído":
-            cor_classe = "#e74c3c"
-        elif classe_detectada == "Ar Livre":
-            cor_classe = "#9b59b6" # Roxo
-        elif classe_detectada == "Sem Dados":
-            cor_classe = "#7f8c8d"
+        if classe_detectada == "Leve": cor_classe = "#27ae60"
+        elif classe_detectada == "Moderada": cor_classe = "#f1c40f"
+        elif classe_detectada == "Avançada": cor_classe = "#e67e22"
+        elif classe_detectada == "Corroído": cor_classe = "#e74c3c"
+        elif classe_detectada == "Ar Livre": cor_classe = "#9b59b6"
+        elif classe_detectada == "Sem Dados": cor_classe = "#7f8c8d"
             
-        self.lbl_cls_degrad_val.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {cor_classe};")
+        if hasattr(self, 'lbl_cls_degrad_val'):
+            self.lbl_cls_degrad_val.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {cor_classe};")
 
         # 5. Atualiza os Displays de Texto e Valores na tela (Instantâneos)
-        self.lbl_tau_val.setText(self.formatar_valor_tempo(tau))
-        self.lbl_auc_val.setText(f"{auc:.1f}")
+        if hasattr(self, 'lbl_tau_val'): self.lbl_tau_val.setText(self.formatar_valor_tempo(tau))
+        if hasattr(self, 'lbl_auc_val'): self.lbl_auc_val.setText(f"{auc:.1f}")
 
         # Se não estiver no modo contínuo, zera a exibição da média móvel
-        if not self.chk_auto_trigger.isChecked():
-            self.lbl_tau_ma_val.setText(self.formatar_valor_tempo(None))
-            self.lbl_auc_ma_val.setText("---")
+        if not is_auto:
+            if hasattr(self, 'lbl_tau_ma_val'): self.lbl_tau_ma_val.setText(self.formatar_valor_tempo(None))
+            if hasattr(self, 'lbl_auc_ma_val'): self.lbl_auc_ma_val.setText("---")
 
         # Lógica de coleta automatizada de 10 medições sequenciais
         if hasattr(self, 'is_collecting_sequential') and self.is_collecting_sequential:
-            id_amostra = self.edit_id_amostra.text().strip()
+            id_amostra = self.edit_id_amostra.text().strip() if hasattr(self, 'edit_id_amostra') else "0"
             material, classe = self.obter_material_e_classe_selecionados()
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
@@ -3578,39 +3577,40 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if self.sequential_collect_counter > 0:
                 total = self.sequential_collect_total
                 atual = total - self.sequential_collect_counter + 1
-                self.active_save_btn.setText(f"({atual}/{total})")
-                # Intervalo de 150 ms para estabilização física do hardware e comunicação serial
+                if hasattr(self, 'active_save_btn'): self.active_save_btn.setText(f"({atual}/{total})")
                 QtCore.QTimer.singleShot(150, self.serial_thread.disparar_leitura)
             else:
                 self.finalizar_coleta_sequencial(abortado=False)
 
-        # 6. Atualiza os gráficos da Aba 1 (tempo real)
-        self.curve_bruto.setData(valores_processados)
-        self.line_peak.setValue(peak_idx)
-        self.line_offset.setValue(offset)
+        # 6. Atualiza os gráficos da Aba 1 (tempo real) se existirem
+        if hasattr(self, 'curve_bruto'): self.curve_bruto.setData(valores_processados)
+        if hasattr(self, 'line_peak'): self.line_peak.setValue(peak_idx)
+        if hasattr(self, 'line_offset'): self.line_offset.setValue(offset)
 
         # Plot do decaimento com escala dinâmica de tempo
         fator_t, unid_t = self.obter_unidade_tempo()
         tempo_dec = np.arange(len(decay_adj)) * self.dt_us * fator_t
-        self.curve_decay.setData(tempo_dec, decay_adj)
-        self.plot_decay.setXRange(0, tempo_dec[-1])
+        if hasattr(self, 'curve_decay'): self.curve_decay.setData(tempo_dec, decay_adj)
+        if hasattr(self, 'plot_decay'):
+            self.plot_decay.setXRange(0, tempo_dec[-1])
+            khz = 1000.0 / self.dt_us if self.dt_us > 0 else 0.0
+            modo_nome = "ETS" if not is_auto else "DMA"
+            self.plot_decay.setLabel('bottom', f'Tempo (Modo {modo_nome} - {khz:.2f} kHz)', unid_t)
         
-        # Atualiza a legenda do eixo inferior com a unidade escalada correspondente
-        khz = 1000.0 / self.dt_us if self.dt_us > 0 else 0.0
-        modo_nome = "ETS" if not self.chk_auto_trigger.isChecked() else "DMA"
-        # Atualiza os gráficos da Sub-Aba 2 do Módulo 2 (Monitoramento em Tempo Real) se estiver ativa
-        if hasattr(self, 'tab_sub_caracterizacao') and self.tab_sub_caracterizacao.currentIndex() == 1:
+        # Atualiza os gráficos do Módulo 2
+        if hasattr(self, 'tab_sub_caracterizacao'):
+            self.atualizar_graficos_tempo_real_caracterizacao()
+        elif hasattr(self, 'mode') and self.mode in ["all", "coil"]:
             self.atualizar_graficos_tempo_real_caracterizacao()
 
         # 6.5. Atualiza os gráficos da Aba 4 (Diagnóstico em Tempo Real) se estiver ativa
-        if self.tab_widget.currentIndex() == 3:
-            self.lbl_diag_material.setText(f"Material: {material_detectado}")
-            self.lbl_diag_classe.setText(f"Classe: {classe_detectada}")
-            self.lbl_diag_confianca.setText(f"Confiança: {confianca:.1f}%")
-            self.lbl_diag_tau.setText(f"Tau: {self.formatar_valor_tempo(tau)}")
-            self.lbl_diag_auc.setText(f"AUC: {auc:.1f}")
+        if hasattr(self, 'tab_widget') and self.tab_widget.currentIndex() == 3:
+            if hasattr(self, 'lbl_diag_material'): self.lbl_diag_material.setText(f"Material: {material_detectado}")
+            if hasattr(self, 'lbl_diag_classe'): self.lbl_diag_classe.setText(f"Classe: {classe_detectada}")
+            if hasattr(self, 'lbl_diag_confianca'): self.lbl_diag_confianca.setText(f"Confiança: {confianca:.1f}%")
+            if hasattr(self, 'lbl_diag_tau'): self.lbl_diag_tau.setText(f"Tau: {self.formatar_valor_tempo(tau)}")
+            if hasattr(self, 'lbl_diag_auc'): self.lbl_diag_auc.setText(f"AUC: {auc:.1f}")
             
-            # Calcular R² para exibir nas métricas físicas
             try:
                 y_pred = B * t_fit + A
                 y_mean = np.mean(y_log)
@@ -3619,9 +3619,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 r2_val = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else 1.0
             except Exception:
                 r2_val = 0.0
-            self.lbl_diag_r2.setText(f"R\u00b2: {r2_val:.4f}")
+            if hasattr(self, 'lbl_diag_r2'): self.lbl_diag_r2.setText(f"R\u00b2: {r2_val:.4f}")
             
-            # Define cores dos textos com base na classe
             cor_classe = "#2ecc71"
             if classe_detectada == "Leve": cor_classe = "#27ae60"
             elif classe_detectada == "Moderada": cor_classe = "#f1c40f"
@@ -3629,36 +3628,35 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             elif classe_detectada == "Corro\u00eddo": cor_classe = "#e74c3c"
             elif classe_detectada == "Ar Livre": cor_classe = "#9b59b6"
             elif classe_detectada == "Sem Dados": cor_classe = "#7f8c8d"
-            self.lbl_diag_classe.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {cor_classe};")
+            if hasattr(self, 'lbl_diag_classe'):
+                self.lbl_diag_classe.setStyleSheet(f"font-size: 13pt; font-weight: bold; color: {cor_classe};")
             
-            # Atualiza Curva Ativa Verde Neon usando a escala de tempo do diagnóstico
             fator_diag = getattr(self, 'fator_diag', fator_t)
             tempo_dec_diag = np.arange(len(decay_adj)) * self.dt_us * fator_diag
-            if self.diag_active_curve is None:
-                self.diag_active_curve = self.plot_diag_curves.plot(
-                    tempo_dec_diag, decay_adj, 
-                    pen=pg.mkPen("#00ff00", width=3.5), 
-                    name="Sinal Ativo"
-                )
-            else:
-                self.diag_active_curve.setData(tempo_dec_diag, decay_adj)
+            if hasattr(self, 'plot_diag_curves'):
+                if getattr(self, 'diag_active_curve', None) is None:
+                    self.diag_active_curve = self.plot_diag_curves.plot(
+                        tempo_dec_diag, decay_adj, 
+                        pen=pg.mkPen("#00ff00", width=3.5), 
+                        name="Sinal Ativo"
+                    )
+                else:
+                    self.diag_active_curve.setData(tempo_dec_diag, decay_adj)
                 
-            # Atualiza Ponto Ativo no Scatter Plot (Estrela Amarela Grande com borda branca) usando fator_diag
             tau_escalado = tau * fator_diag
-            if self.diag_active_scatter is None:
-                self.diag_active_scatter = self.plot_diag_scatter.plot(
-                    [tau_escalado], [auc], pen=None, symbol="star", symbolSize=16,
-                    symbolBrush=pg.mkBrush("#f1c40f"), symbolPen=pg.mkPen("w", width=1.5)
-                )
-            else:
-                self.diag_active_scatter.setData([tau_escalado], [auc])
+            if hasattr(self, 'plot_diag_scatter'):
+                if getattr(self, 'diag_active_scatter', None) is None:
+                    self.diag_active_scatter = self.plot_diag_scatter.plot(
+                        [tau_escalado], [auc], pen=None, symbol="star", symbolSize=16,
+                        symbolBrush=pg.mkBrush("#f1c40f"), symbolPen=pg.mkPen("w", width=1.5)
+                    )
+                else:
+                    self.diag_active_scatter.setData([tau_escalado], [auc])
                 
-            # Atualiza linhas indicadoras nas distribuições
             CLASSES_ORDEM = ["Saudável", "Leve", "Moderada", "Avançada", "Corroído", "Ar Livre"]
             pos_x = None
             x_val = 1.0
             for c in CLASSES_ORDEM:
-                # Conta se há amostras no banco de dados para esta classe
                 n_amostras = sum(1 for a in self.amostras_estatisticas if a["classe"] == c) if hasattr(self, 'amostras_estatisticas') else 0
                 if n_amostras > 0:
                     if c.lower() == classe_detectada.lower():
@@ -3667,26 +3665,26 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     x_val += 1.0
             
             if pos_x is not None:
-                if self.diag_active_auc_line is None:
+                if getattr(self, 'diag_active_auc_line', None) is None and hasattr(self, 'plot_diag_auc'):
                     self.diag_active_auc_line = pg.InfiniteLine(angle=0, pen=pg.mkPen("#f1c40f", width=1.5, style=QtCore.Qt.DashLine))
                     self.plot_diag_auc.addItem(self.diag_active_auc_line)
-                self.diag_active_auc_line.setValue(auc)
+                if hasattr(self, 'diag_active_auc_line') and self.diag_active_auc_line:
+                    self.diag_active_auc_line.setValue(auc)
                 
-                if self.diag_active_tau_line is None:
+                if getattr(self, 'diag_active_tau_line', None) is None and hasattr(self, 'plot_diag_tau'):
                     self.diag_active_tau_line = pg.InfiniteLine(angle=0, pen=pg.mkPen("#f1c40f", width=1.5, style=QtCore.Qt.DashLine))
                     self.plot_diag_tau.addItem(self.diag_active_tau_line)
-                self.diag_active_tau_line.setValue(tau_escalado)
+                if hasattr(self, 'diag_active_tau_line') and self.diag_active_tau_line:
+                    self.diag_active_tau_line.setValue(tau_escalado)
         
         # 7. Se estiver no modo contínuo, adiciona os dados nas deques de tendência
-        if self.chk_auto_trigger.isChecked():
+        if is_auto and hasattr(self, 'trend_indices'):
             self.trend_counter += 1
             self.trend_indices.append(self.trend_counter)
             self.trend_tau.append(tau)
             self.trend_auc.append(auc)
             
-            # Calcula as médias móveis (janela de 10 amostras)
             ma_window = 10
-            
             def calcular_ma(deque_vals):
                 vals = list(deque_vals)
                 ma = []
@@ -3698,27 +3696,23 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             ma_tau = calcular_ma(self.trend_tau)
             ma_auc = calcular_ma(self.trend_auc)
             
-            # Atualiza os dados das tendências escalando o tempo dinamicamente
             fator_t, unid_t = self.obter_unidade_tempo()
             trend_tau_escalado = [v * fator_t for v in self.trend_tau]
             ma_tau_escalado = [v * fator_t for v in ma_tau]
 
-            self.curve_trend_tau.setData(list(self.trend_indices), trend_tau_escalado)
-            self.curve_trend_auc.setData(list(self.trend_indices), list(self.trend_auc))
-            self.curve_trend_tau_ma.setData(list(self.trend_indices), ma_tau_escalado)
-            self.curve_trend_auc_ma.setData(list(self.trend_indices), ma_auc)
+            if hasattr(self, 'curve_trend_tau'): self.curve_trend_tau.setData(list(self.trend_indices), trend_tau_escalado)
+            if hasattr(self, 'curve_trend_auc'): self.curve_trend_auc.setData(list(self.trend_indices), list(self.trend_auc))
+            if hasattr(self, 'curve_trend_tau_ma'): self.curve_trend_tau_ma.setData(list(self.trend_indices), ma_tau_escalado)
+            if hasattr(self, 'curve_trend_auc_ma'): self.curve_trend_auc_ma.setData(list(self.trend_indices), ma_auc)
             
-            # Atualiza o rótulo do eixo Y esquerdo do gráfico de tendências
-            self.plot_trend.setLabel('left', f'Tau ({unid_t})', color='#2ecc71')
+            if hasattr(self, 'plot_trend'): self.plot_trend.setLabel('left', f'Tau ({unid_t})', color='#2ecc71')
             
-            # Atualiza a exibição textual das Médias Móveis na tela
-            if len(ma_tau) > 0:
+            if len(ma_tau) > 0 and hasattr(self, 'lbl_tau_ma_val'):
                 self.lbl_tau_ma_val.setText(self.formatar_valor_tempo(ma_tau[-1]))
-            if len(ma_auc) > 0:
+            if len(ma_auc) > 0 and hasattr(self, 'lbl_auc_ma_val'):
                 self.lbl_auc_ma_val.setText(f"{ma_auc[-1]:.1f}")
             
-            # Auto escala o eixo Y do gráfico de tendências de AUC na ViewBox secundária
-            if len(self.trend_auc) > 0:
+            if len(self.trend_auc) > 0 and hasattr(self, 'trend_auc_axis'):
                 min_auc, max_auc = min(self.trend_auc), max(self.trend_auc)
                 padding = max(10, (max_auc - min_auc) * 0.1)
                 self.trend_auc_axis.setYRange(min_auc - padding, max_auc + padding)
