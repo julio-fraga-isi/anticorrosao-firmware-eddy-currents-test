@@ -407,8 +407,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.mode = mode  # "all", "ai", or "coil"
         self.launcher = launcher
         
-        # Estado serial
-        self.serial_thread = SerialWorker()
+        # Estado serial compartilhado entre Módulo 1 e Módulo 2
+        if self.launcher and hasattr(self.launcher, 'shared_serial_thread'):
+            self.serial_thread = self.launcher.shared_serial_thread
+        else:
+            self.serial_thread = SerialWorker()
+            if self.launcher:
+                self.launcher.shared_serial_thread = self.serial_thread
+
         self.serial_thread.curva_recebida.connect(self.processar_nova_curva)
         self.serial_thread.erro_serial.connect(self.tratar_erro_serial)
         
@@ -1870,6 +1876,58 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             scroll_coil_layout = QtWidgets.QVBoxLayout(scroll_coil_content)
             scroll_coil_layout.setContentsMargins(8, 8, 8, 8)
             scroll_coil_layout.setSpacing(12)
+
+            # 0. Conectividade Serial e Modo de Operação (Módulo 2)
+            group_coil_conn = CollapsibleGroupBox("🔌 Conectividade Serial & Operação")
+            group_coil_conn_layout = QtWidgets.QVBoxLayout()
+            group_coil_conn.setLayout(group_coil_conn_layout)
+
+            grid_conn = QtWidgets.QGridLayout()
+            grid_conn.addWidget(QtWidgets.QLabel("Porta COM:"), 0, 0)
+            
+            if not hasattr(self, 'combo_portas'):
+                self.combo_portas = QtWidgets.QComboBox()
+                self.atualizar_portas_disponiveis()
+
+            grid_conn.addWidget(self.combo_portas, 0, 1)
+
+            btn_refresh = QtWidgets.QPushButton("Refresh")
+            btn_refresh.clicked.connect(self.atualizar_portas_disponiveis)
+            grid_conn.addWidget(btn_refresh, 0, 2)
+
+            grid_conn.addWidget(QtWidgets.QLabel("Baud Rate:"), 1, 0)
+            if not hasattr(self, 'combo_baud'):
+                self.combo_baud = QtWidgets.QComboBox()
+                self.combo_baud.addItems(["115200", "230400", "460800", "921600"])
+                self.combo_baud.setCurrentText("921600")
+            grid_conn.addWidget(self.combo_baud, 1, 1, 1, 2)
+
+            if not hasattr(self, 'btn_conectar'):
+                self.btn_conectar = QtWidgets.QPushButton("Conectar")
+                self.btn_conectar.clicked.connect(self.alternar_conexao)
+                self.btn_conectar.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+            grid_conn.addWidget(self.btn_conectar, 2, 0, 1, 3)
+
+            if not hasattr(self, 'lbl_status_conn'):
+                self.lbl_status_conn = QtWidgets.QLabel("Status: Desconectado")
+                self.lbl_status_conn.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            grid_conn.addWidget(self.lbl_status_conn, 3, 0, 1, 3)
+
+            group_coil_conn_layout.addLayout(grid_conn)
+
+            if not hasattr(self, 'btn_single_trigger'):
+                self.btn_single_trigger = QtWidgets.QPushButton("Disparar Leitura Única")
+                self.btn_single_trigger.clicked.connect(self.solicitar_leitura_manual)
+                self.btn_single_trigger.setMinimumHeight(28)
+                self.btn_single_trigger.setStyleSheet("font-weight: bold; background-color: #2980b9; color: white;")
+            group_coil_conn_layout.addWidget(self.btn_single_trigger)
+
+            if not hasattr(self, 'chk_auto_trigger'):
+                self.chk_auto_trigger = QtWidgets.QCheckBox("Modo Contínuo (Auto-Trigger)")
+                self.chk_auto_trigger.stateChanged.connect(self.alternar_auto_trigger)
+            group_coil_conn_layout.addWidget(self.chk_auto_trigger)
+
+            scroll_coil_layout.addWidget(group_coil_conn)
     
             # 1. Seleção e Cadastro de Bobinas / Sensores
             group_coil_select = QtWidgets.QGroupBox("Seleção do Sensor / Bobina")
@@ -3015,6 +3073,25 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.plot_diag_tau.setLabel('left', 'Tau', unid_diag)
         self.plot_diag_scatter.setLabel('bottom', 'Tau', unid_diag)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.atualizar_status_conexao_ui()
+
+    def atualizar_status_conexao_ui(self):
+        if not hasattr(self, 'btn_conectar') or not hasattr(self, 'lbl_status_conn'):
+            return
+        if hasattr(self, 'serial_thread') and self.serial_thread.running:
+            port_str = getattr(self.serial_thread, 'port_name', 'Ativa')
+            self.lbl_status_conn.setText(f"Status: Conectado ({port_str})")
+            self.lbl_status_conn.setStyleSheet("color: #2ecc71; font-weight: bold;")
+            self.btn_conectar.setText("Desconectar")
+            self.btn_conectar.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
+        else:
+            self.lbl_status_conn.setText("Status: Desconectado")
+            self.lbl_status_conn.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            self.btn_conectar.setText("Conectar")
+            self.btn_conectar.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+
     # =====================================================================
     # LÓGICA DE GERENCIAMENTO DE CONEXÃO
     # =====================================================================
@@ -3052,20 +3129,19 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 return
             
             self.serial_thread.conectar(porta, baud)
-            self.btn_conectar.setText("Desconectar")
-            self.btn_conectar.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
+            self.atualizar_status_conexao_ui()
             
             # Envia a configuração de frequência síncrona padrão/atual 100ms após conectar (para dar tempo da serial iniciar)
-            QtCore.QTimer.singleShot(100, lambda: self.atualizar_frequencia_disparo(self.spin_freq.value()))
+            if hasattr(self, 'spin_freq'):
+                QtCore.QTimer.singleShot(100, lambda: self.atualizar_frequencia_disparo(self.spin_freq.value()))
             # Envia a configuração de dt síncrona inicial 150ms após conectar
-            QtCore.QTimer.singleShot(150, lambda: self.serial_thread.enviar_config_dt(int(self.spin_dt.value() * 1000)))
+            if hasattr(self, 'spin_dt'):
+                QtCore.QTimer.singleShot(150, lambda: self.serial_thread.enviar_config_dt(int(self.spin_dt.value() * 1000)))
         else:
-            self.chk_auto_trigger.setChecked(False) # Desativa auto-trigger antes de desligar
+            if hasattr(self, 'chk_auto_trigger'):
+                self.chk_auto_trigger.setChecked(False) # Desativa auto-trigger antes de desligar
             self.serial_thread.desconectar()
-            self.lbl_status_conn.setText("Status: Desconectado")
-            self.lbl_status_conn.setStyleSheet("color: #e74c3c; font-weight: bold;")
-            self.btn_conectar.setText("Conectar")
-            self.btn_conectar.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+            self.atualizar_status_conexao_ui()
 
     def tratar_erro_serial(self, msg_erro):
         print(f"[ERRO SERIAL]: {msg_erro}")
@@ -6470,6 +6546,7 @@ class ModuleLauncherWindow(QtWidgets.QMainWindow):
         
         self.ai_window = None
         self.coil_window = None
+        self.shared_serial_thread = SerialWorker()
         
         self.init_ui()
 
