@@ -69,11 +69,343 @@ def obter_simbolo_material(mat_nome):
     if "AR" in raw or "AL" in raw: return "+"
     return "o"
 
+ESTILOS_MATERIAIS = {
+    "A36 Comum": QtCore.Qt.SolidLine,
+    "A36 GE": QtCore.Qt.DashLine,
+    "A36 GF": QtCore.Qt.DotLine,
+    "Estrutura Torre": QtCore.Qt.DashDotLine,
+    "Ar Livre": QtCore.Qt.SolidLine
+}
+
+def obter_estilo_material(mat_nome):
+    if not mat_nome: return QtCore.Qt.SolidLine
+    raw = str(mat_nome).strip().upper()
+    if "GE" in raw: return QtCore.Qt.DashLine
+    if "GF" in raw: return QtCore.Qt.DotLine
+    if "TORRE" in raw or "ET" in raw: return QtCore.Qt.DashDotLine
+    if "AR" in raw or "AL" in raw: return QtCore.Qt.SolidLine
+    return QtCore.Qt.SolidLine
+
+
+class FullScreenContainerDialog(QtWidgets.QDialog):
+    def __init__(self, container_widget, original_parent, title="Gráficos em Tela Cheia", parent=None):
+        super().__init__(parent)
+        self.container_widget = container_widget
+        self.original_parent = original_parent
+
+        # Salva o índice original e stretch do container no layout pai antes de reparentar
+        self.original_index = -1
+        self.original_stretch = 1
+        if original_parent:
+            parent_layout = original_parent.layout() if callable(getattr(original_parent, 'layout', None)) else getattr(original_parent, 'layout', None)
+            if parent_layout and hasattr(parent_layout, 'indexOf'):
+                try:
+                    self.original_index = parent_layout.indexOf(container_widget)
+                except Exception:
+                    self.original_index = -1
+
+        self.setWindowTitle(title)
+        self.setStyleSheet("background-color: #121214; color: #ffffff;")
+        self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.WindowMaximizeButtonHint | QtCore.Qt.WindowCloseButtonHint)
+
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.setContentsMargins(12, 12, 12, 12)
+        self.layout.setSpacing(8)
+
+        # Header Bar
+        header = QtWidgets.QHBoxLayout()
+        lbl_title = QtWidgets.QLabel(f"<h2>📊 {title}</h2>")
+        lbl_title.setStyleSheet("color: #00e676; font-weight: bold; font-family: 'Segoe UI';")
+        header.addWidget(lbl_title)
+        header.addStretch()
+
+        btn_close = QtWidgets.QPushButton("❌ Fechar Tela Cheia (ESC)")
+        btn_close.setMinimumHeight(38)
+        btn_close.setCursor(QtCore.Qt.PointingHandCursor)
+        btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c; color: white; font-weight: bold; font-size: 10pt;
+                padding: 0 16px; border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+        """)
+        btn_close.clicked.connect(self.close)
+        header.addWidget(btn_close)
+
+        self.layout.addLayout(header)
+
+        # Reparenta o container gráfico para a janela em tela cheia
+        self.layout.addWidget(container_widget, 1)
+        self.showMaximized()
+
+    def closeEvent(self, event):
+        # Restaura o container gráfico exatamente no seu índice original no layout pai
+        if self.original_parent:
+            parent_layout = None
+            if hasattr(self.original_parent, 'layout'):
+                attr = getattr(self.original_parent, 'layout')
+                if callable(attr):
+                    try: parent_layout = attr()
+                    except Exception: parent_layout = attr
+                else:
+                    parent_layout = attr
+
+            if parent_layout:
+                idx = getattr(self, 'original_index', -1)
+                stretch = getattr(self, 'original_stretch', 2)
+                if idx >= 0 and hasattr(parent_layout, 'insertWidget'):
+                    parent_layout.insertWidget(idx, self.container_widget, stretch)
+                elif hasattr(parent_layout, 'addWidget'):
+                    parent_layout.addWidget(self.container_widget, stretch)
+                else:
+                    self.container_widget.setParent(self.original_parent)
+            else:
+                self.container_widget.setParent(self.original_parent)
+        event.accept()
+
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(event)
+
+
+class FullScreenSinglePlotDialog(QtWidgets.QDialog):
+    def __init__(self, plot_item, container_win, row, col, col_span=1, title="Gráfico Individual", parent=None):
+        super().__init__(parent)
+        self.plot_item = plot_item
+        self.container_win = container_win
+        self.row = row
+        self.col = col
+        self.col_span = col_span
+
+        self.setWindowTitle(title)
+        self.setStyleSheet("background-color: #121214; color: #ffffff;")
+        self.setWindowFlags(QtCore.Qt.Window | QtCore.Qt.WindowMaximizeButtonHint | QtCore.Qt.WindowCloseButtonHint)
+
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.setContentsMargins(12, 12, 12, 12)
+        self.layout.setSpacing(8)
+
+        # Header Bar
+        header = QtWidgets.QHBoxLayout()
+        lbl_title = QtWidgets.QLabel(f"<h2>🔍 {title}</h2>")
+        lbl_title.setStyleSheet("color: #00e676; font-weight: bold; font-family: 'Segoe UI';")
+        header.addWidget(lbl_title)
+        header.addStretch()
+
+        btn_close = QtWidgets.QPushButton("❌ Fechar Tela Cheia (ESC)")
+        btn_close.setMinimumHeight(38)
+        btn_close.setCursor(QtCore.Qt.PointingHandCursor)
+        btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c; color: white; font-weight: bold; font-size: 10pt;
+                padding: 0 16px; border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+        """)
+        btn_close.clicked.connect(self.close)
+        header.addWidget(btn_close)
+
+        self.layout.addLayout(header)
+
+        # Container do gráfico individual
+        self.full_win = pg.GraphicsLayoutWidget()
+        self.full_win.setBackground('#121214')
+        self.layout.addWidget(self.full_win, 1)
+
+        # Move o plot_item individual para o layout de tela cheia
+        if hasattr(container_win, 'ci'):
+            container_win.ci.removeItem(plot_item)
+        self.full_win.addItem(plot_item)
+
+        self.showMaximized()
+
+    def closeEvent(self, event):
+        # Restaura o plot_item de volta para a sua posição exata na grade original
+        try:
+            self.full_win.removeItem(self.plot_item)
+            if hasattr(self.container_win, 'ci'):
+                self.container_win.ci.addItem(self.plot_item, row=self.row, col=self.col, colspan=self.col_span)
+        except Exception as e:
+            print(f"[ERRO] Falha ao restaurar plot individual: {e}")
+        event.accept()
+
+    def keyPressEvent(self, event):
+        if event.key() == QtCore.Qt.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(event)
+
+
+class CustomFloatingTooltipWidget(QtWidgets.QFrame):
+    """
+    Balão de Tooltip flutuante personalizado, 50% semi-transparente, persistente e interativo.
+    - Modo Hover: Não possui timeout; fica aberto indefinidamente enquanto o mouse estiver sobre o ponto/linha.
+    - Modo Fixo (Pinned): Ao clicar no ponto, linha ou no próprio tooltip, ele fica fixo com um botão '✕' de fechar.
+    """
+    sig_closed = QtCore.pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent, QtCore.Qt.ToolTip | QtCore.Qt.FramelessWindowHint | QtCore.Qt.NoDropShadowWindowHint | QtCore.Qt.WindowStaysOnTopHint)
+        self.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+
+        self.is_pinned = False
+        self.current_target_plot = None
+
+        # Container Principal
+        self.layout_main = QtWidgets.QVBoxLayout(self)
+        self.layout_main.setContentsMargins(0, 0, 0, 0)
+        self.layout_main.setSpacing(0)
+
+        self.box_frame = QtWidgets.QFrame(self)
+        self.box_frame.setStyleSheet("""
+            QFrame {
+                background-color: rgba(22, 22, 28, 0.72);
+                border: 2px solid rgba(41, 182, 246, 0.90);
+                border-radius: 8px;
+                color: #ffffff;
+            }
+        """)
+        self.box_layout = QtWidgets.QVBoxLayout(self.box_frame)
+        self.box_layout.setContentsMargins(10, 8, 10, 8)
+        self.box_layout.setSpacing(6)
+
+        # Barra Superior de Controle (Botão Fechar ✕)
+        self.header_frame = QtWidgets.QFrame(self.box_frame)
+        self.header_layout = QtWidgets.QHBoxLayout(self.header_frame)
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.lbl_pin_status = QtWidgets.QLabel("📌 <b>TOOLTIP FIXADO</b>", self.header_frame)
+        self.lbl_pin_status.setStyleSheet("color: #00e676; font-size: 10pt; font-family: Segoe UI;")
+        
+        self.btn_close = QtWidgets.QPushButton("✕", self.header_frame)
+        self.btn_close.setFixedSize(22, 22)
+        self.btn_close.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_close.setToolTip("Fechar Tooltip Fixado (ou clique fora dele)")
+        self.btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: #ff5252;
+                color: white;
+                font-weight: bold;
+                border-radius: 11px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #ff1744;
+            }
+        """)
+        self.btn_close.clicked.connect(self.fechar_tooltip)
+
+        self.header_layout.addWidget(self.lbl_pin_status)
+        self.header_layout.addStretch()
+        self.header_layout.addWidget(self.btn_close)
+        self.box_layout.addWidget(self.header_frame)
+        self.header_frame.hide()  # Oculto por padrão no modo hover
+
+        # Conteúdo HTML com transparência de fundo
+        self.lbl_content = QtWidgets.QLabel(self.box_frame)
+        self.lbl_content.setTextFormat(QtCore.Qt.RichText)
+        self.lbl_content.setWordWrap(True)
+        self.lbl_content.setMaximumWidth(420)
+        self.lbl_content.setStyleSheet("color: #ffffff; font-size: 9.5pt; font-family: Segoe UI, sans-serif; background: transparent;")
+        self.box_layout.addWidget(self.lbl_content)
+
+        self.layout_main.addWidget(self.box_frame)
+        self.setMinimumSize(0, 0)
+        self.box_frame.setMinimumSize(0, 0)
+
+    def minimumSizeHint(self):
+        return QtCore.QSize(10, 10)
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            if not self.is_pinned:
+                self.fixar_tooltip()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def set_content(self, html_text):
+        self.lbl_content.setText(html_text)
+        self.adjustSize()
+
+    def move_safe(self, pos_global):
+        self.adjustSize()
+        screen = QtWidgets.QApplication.desktop().availableGeometry(pos_global)
+        w = self.width()
+        h = self.height()
+        
+        x = pos_global.x() + 15
+        y = pos_global.y() + 15
+
+        if x + w > screen.right():
+            x = pos_global.x() - w - 15
+        if y + h > screen.bottom():
+            y = pos_global.y() - h - 15
+
+        x = max(screen.left(), min(x, screen.right() - w))
+        y = max(screen.top(), min(y, screen.bottom() - h))
+
+        self.move(int(x), int(y))
+
+    def exibir_hover(self, pos_global, html_text, target_plot=None):
+        if self.is_pinned:
+            return
+        self.current_target_plot = target_plot
+        self.header_frame.hide()
+        self.box_frame.setStyleSheet("""
+            QFrame {
+                background-color: rgba(22, 22, 28, 0.72);
+                border: 2px solid rgba(41, 182, 246, 0.90);
+                border-radius: 8px;
+                color: #ffffff;
+            }
+        """)
+        self.set_content(html_text)
+        self.move_safe(pos_global)
+        self.show()
+
+    def fixar_tooltip(self, pos_global=None, html_text=None, target_plot=None):
+        self.is_pinned = True
+        if target_plot:
+            self.current_target_plot = target_plot
+        self.header_frame.show()
+        self.box_frame.setStyleSheet("""
+            QFrame {
+                background-color: rgba(30, 30, 42, 0.85);
+                border: 2.5px solid rgba(0, 230, 118, 0.95);
+                border-radius: 8px;
+                color: #ffffff;
+            }
+        """)
+        if html_text:
+            self.set_content(html_text)
+        if pos_global:
+            self.move_safe(pos_global)
+        else:
+            self.adjustSize()
+        self.show()
+
+    def fechar_tooltip(self):
+        self.is_pinned = False
+        self.current_target_plot = None
+        self.header_frame.hide()
+        self.hide()
+        self.sig_closed.emit()
+
 
 class EddyCurrentPlotter(QtWidgets.QWidget):
 
-    def __init__(self):
+    def __init__(self, mode="all", launcher=None):
         super().__init__()
+        self.mode = mode  # "all", "ai", or "coil"
+        self.launcher = launcher
         
         # Estado serial
         self.serial_thread = SerialWorker()
@@ -92,6 +424,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.caracterizacao_dir = os.path.join(self.base_dir, "datasets", "caracterizacao_bobinas")
         self.loaded_coil_records = []
         self.imported_file_paths = []
+        
+        # Tooltip Flutuante Persistente e Interativo
+        self.floating_tooltip = CustomFloatingTooltipWidget(self)
+        self.floating_tooltip.sig_closed.connect(lambda: self.atualizar_destaque_visual_hover(target_plot=None))
         
         # Parâmetros físicos
         self.dt_us = 0.21875  # Padrão calibrado: 256 pontos em 56 us
@@ -164,7 +500,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
     def init_ui(self):
         # Configuração da Janela Principal
-        self.setWindowTitle("ISI Sensoriamento - Eddy Current Test Bench & Data Aquisition")
+        if self.mode == "ai":
+            self.setWindowTitle("Módulo 1: Aquisição & Diagnóstico IA — Eddy Current")
+        elif self.mode == "coil":
+            self.setWindowTitle("Módulo 2: Caracterização & Comparação de Bobinas — Eddy Current")
+        else:
+            self.setWindowTitle("ISI Sensoriamento - Eddy Current Test Bench & Data Aquisition")
+            
         self.resize(1350, 920)
 
         # Configurações de cores da biblioteca PyQtGraph
@@ -174,1741 +516,44 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         # Layout Principal com Abas (Tabs)
         outer_layout = QtWidgets.QVBoxLayout(self)
+        outer_layout.setContentsMargins(6, 6, 6, 6)
+        outer_layout.setSpacing(6)
+
+        # Adiciona a Barra Superior de Navegação se o Módulo foi aberto via Launcher
+        if self.launcher is not None or self.mode in ["ai", "coil"]:
+            top_nav_bar = QtWidgets.QHBoxLayout()
+            top_nav_bar.setContentsMargins(4, 2, 4, 4)
+            
+            btn_back = QtWidgets.QPushButton("⬅️ Voltar ao Menu Principal")
+            btn_back.setMinimumHeight(32)
+            btn_back.setCursor(QtCore.Qt.PointingHandCursor)
+            btn_back.setStyleSheet("""
+                QPushButton {
+                    background-color: #2c2c2e; color: #00e676; font-weight: bold; font-size: 9.5pt;
+                    border: 1px solid #3a3a3c; border-radius: 4px; padding: 0 14px;
+                }
+                QPushButton:hover {
+                    background-color: #3a3a3c; color: #ffffff; border: 1px solid #00e676;
+                }
+            """)
+            btn_back.clicked.connect(self.voltar_ao_menu_principal)
+            top_nav_bar.addWidget(btn_back)
+
+            if self.mode == "ai":
+                lbl_mod_name = QtWidgets.QLabel("🔬 <b>MÓDULO 1: Aquisição & Diagnóstico IA</b>")
+            elif self.mode == "coil":
+                lbl_mod_name = QtWidgets.QLabel("🧲 <b>MÓDULO 2: Caracterização & Comparação de Bobinas</b>")
+            else:
+                lbl_mod_name = QtWidgets.QLabel("⚡ <b>SISTEMA DE ENSAIO EDDY CURRENT</b>")
+
+            lbl_mod_name.setStyleSheet("font-size: 11pt; color: #ffffff; margin-left: 10px;")
+            top_nav_bar.addWidget(lbl_mod_name)
+            top_nav_bar.addStretch()
+
+            outer_layout.addLayout(top_nav_bar)
+
         self.tab_widget = QtWidgets.QTabWidget()
-        outer_layout.addWidget(self.tab_widget)
-
-        # Aba 1: Aquisição em Tempo Real
-        self.tab_acq = QtWidgets.QWidget()
-        self.tab_widget.addTab(self.tab_acq, "Aquisição em Tempo Real")
-        tab_acq_layout = QtWidgets.QHBoxLayout(self.tab_acq)
-
-        # =====================================================================
-        # PAINEL LATERAL ESQUERDO: Controles e Configurações (Com Scroll Area)
-        # =====================================================================
-        panel_left = QtWidgets.QWidget()
-        panel_left.setMaximumWidth(420)
-        panel_left.setMinimumWidth(380)
-        
-        # Layout principal de panel_left que conterá apenas a scroll area
-        panel_left_outer_layout = QtWidgets.QVBoxLayout(panel_left)
-        panel_left_outer_layout.setContentsMargins(0, 0, 0, 0)
-        
-        scroll_area = QtWidgets.QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: #1e1e1e;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #121214;
-                width: 8px;
-                margin: 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #3a3a3c;
-                min-height: 20px;
-                border-radius: 4px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                border: none;
-                background: none;
-            }
-        """)
-        
-        scroll_content = QtWidgets.QWidget()
-        scroll_content.setStyleSheet("background-color: #1e1e1e;")
-        scroll_content_layout = QtWidgets.QVBoxLayout(scroll_content)
-        scroll_content_layout.setContentsMargins(10, 10, 10, 10)
-        scroll_content_layout.setSpacing(15)
-        
-        scroll_area.setWidget(scroll_content)
-        panel_left_outer_layout.addWidget(scroll_area)
-
-        # 1. Grupo Conectividade
-        group_conn = CollapsibleGroupBox("Conectividade Serial")
-        group_conn_layout = QtWidgets.QGridLayout()
-        group_conn.setLayout(group_conn_layout)
-        
-        group_conn_layout.addWidget(QtWidgets.QLabel("Porta COM:"), 0, 0)
-        self.combo_portas = QtWidgets.QComboBox()
-        self.atualizar_portas_disponiveis()
-        group_conn_layout.addWidget(self.combo_portas, 0, 1)
-        
-        self.btn_atualizar_portas = QtWidgets.QPushButton("Refresh")
-        self.btn_atualizar_portas.clicked.connect(self.atualizar_portas_disponiveis)
-        group_conn_layout.addWidget(self.btn_atualizar_portas, 0, 2)
-
-        group_conn_layout.addWidget(QtWidgets.QLabel("Baud Rate:"), 1, 0)
-        self.combo_baud = QtWidgets.QComboBox()
-        self.combo_baud.addItems(["115200", "230400", "460800", "921600"])
-        self.combo_baud.setCurrentText("921600")
-        group_conn_layout.addWidget(self.combo_baud, 1, 1, 1, 2)
-
-        self.btn_conectar = QtWidgets.QPushButton("Conectar")
-        self.btn_conectar.clicked.connect(self.alternar_conexao)
-        self.btn_conectar.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
-        group_conn_layout.addWidget(self.btn_conectar, 2, 0, 1, 3)
-
-        self.lbl_status_conn = QtWidgets.QLabel("Status: Desconectado")
-        self.lbl_status_conn.setStyleSheet("color: #e74c3c; font-weight: bold;")
-        group_conn_layout.addWidget(self.lbl_status_conn, 3, 0, 1, 3)
-
-        scroll_content_layout.addWidget(group_conn)
-
-        # 2. Grupo de Aquisição de Sinais
-        group_acq = CollapsibleGroupBox("Modo de Operação")
-        group_acq_layout = QtWidgets.QVBoxLayout()
-        group_acq.setLayout(group_acq_layout)
-
-        self.btn_single_trigger = QtWidgets.QPushButton("Disparar Leitura Única")
-        self.btn_single_trigger.clicked.connect(self.solicitar_leitura_manual)
-        self.btn_single_trigger.setMinimumHeight(30)
-        self.btn_single_trigger.setStyleSheet("font-weight: bold; background-color: #2980b9; color: white;")
-        group_acq_layout.addWidget(self.btn_single_trigger)
-
-        self.chk_auto_trigger = QtWidgets.QCheckBox("Modo Contínuo (Auto-Trigger)")
-        self.chk_auto_trigger.stateChanged.connect(self.alternar_auto_trigger)
-        group_acq_layout.addWidget(self.chk_auto_trigger)
-
-
-
-        # Campo para ajuste manual e visualização do tempo entre amostras (dt_us)
-        layout_dt_container = QtWidgets.QVBoxLayout()
-        
-        layout_dt = QtWidgets.QHBoxLayout()
-        lbl_dt = QtWidgets.QLabel("Intervalo dt Alvo (μs):")
-        lbl_dt.setStyleSheet("color: #e1e1e6; font-size: 9pt;")
-        layout_dt.addWidget(lbl_dt)
-        
-        self.spin_dt = QtWidgets.QDoubleSpinBox()
-        self.spin_dt.setDecimals(5)
-        self.spin_dt.setRange(0.00001, 10000.0)
-        self.spin_dt.setSingleStep(0.1)
-        self.spin_dt.setValue(self.dt_us)
-        self.spin_dt.valueChanged.connect(self.atualizar_dt_us)
-        self.spin_dt.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
-        self.spin_dt.setMinimumHeight(28)
-        layout_dt.addWidget(self.spin_dt)
-        layout_dt_container.addLayout(layout_dt)
-        
-        # Label para exibir o dt real calculado pelo microcontrolador
-        self.lbl_dt_medido = QtWidgets.QLabel("dt Real Medido: -- μs (-- kHz)")
-        self.lbl_dt_medido.setStyleSheet("color: #2ecc71; font-size: 8pt; font-style: italic; margin-left: 2px;")
-        layout_dt_container.addWidget(self.lbl_dt_medido)
-        
-        group_acq_layout.addLayout(layout_dt_container)
-
-        # Campo para ajuste da Frequência de Disparo Síncrona (Hz) controlada pelo firmware
-        layout_freq = QtWidgets.QHBoxLayout()
-        lbl_freq = QtWidgets.QLabel("Frequência de Disparo (Hz):")
-        lbl_freq.setStyleSheet("color: #e1e1e6; font-size: 9pt;")
-        layout_freq.addWidget(lbl_freq)
-        
-        self.spin_freq = QtWidgets.QSpinBox()
-        self.spin_freq.setRange(5, 100) # Limites de 5 Hz a 100 Hz
-        self.spin_freq.setValue(30)     # Padrão: 30 Hz
-        self.spin_freq.setSingleStep(5)
-        self.spin_freq.valueChanged.connect(self.atualizar_frequencia_disparo)
-        self.spin_freq.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
-        self.spin_freq.setMinimumHeight(28)
-        layout_freq.addWidget(self.spin_freq)
-        group_acq_layout.addLayout(layout_freq)
-
-        scroll_content_layout.addWidget(group_acq)
-
-        # 2.5. Grupo de Filtros e Processamento de Sinal
-        group_filters = CollapsibleGroupBox("Filtros e Processamento de Sinal")
-        group_filters_layout = QtWidgets.QGridLayout()
-        group_filters.setLayout(group_filters_layout)
-        
-        # Filtro de Curva Bruta
-        self.chk_filtrar_curva = QtWidgets.QCheckBox("Suavizar Transiente (Curva)")
-        self.chk_filtrar_curva.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
-        self.chk_filtrar_curva.setChecked(False)
-        self.chk_filtrar_curva.stateChanged.connect(lambda: self.treinar_classificador())
-        group_filters_layout.addWidget(self.chk_filtrar_curva, 0, 0, 1, 2)
-        
-        group_filters_layout.addWidget(QtWidgets.QLabel("Janela da Curva (pts):"), 1, 0)
-        self.spin_janela_curva = QtWidgets.QSpinBox()
-        self.spin_janela_curva.setRange(1, 25)
-        self.spin_janela_curva.setValue(1)
-        self.spin_janela_curva.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
-        self.spin_janela_curva.valueChanged.connect(lambda: self.treinar_classificador())
-        group_filters_layout.addWidget(self.spin_janela_curva, 1, 1)
-        
-        self.chk_filtrar_IA = QtWidgets.QCheckBox("Treinar IA com Curvas Filtradas")
-        self.chk_filtrar_IA.setStyleSheet("color: #a0a0b2; font-size: 8pt;")
-        self.chk_filtrar_IA.setChecked(True)
-        self.chk_filtrar_IA.stateChanged.connect(lambda: self.treinar_classificador())
-        group_filters_layout.addWidget(self.chk_filtrar_IA, 2, 0, 1, 2)
-        
-        # Separador horizontal
-        line = QtWidgets.QFrame()
-        line.setFrameShape(QtWidgets.QFrame.HLine)
-        line.setFrameShadow(QtWidgets.QFrame.Sunken)
-        line.setStyleSheet("background-color: #3a3a3c; margin: 4px 0px;")
-        group_filters_layout.addWidget(line, 3, 0, 1, 2)
-        
-        # Filtro de Métricas
-        self.chk_filtrar_metricas = QtWidgets.QCheckBox("Estabilizar Gráfico de Tendências")
-        self.chk_filtrar_metricas.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
-        self.chk_filtrar_metricas.setChecked(True)
-        group_filters_layout.addWidget(self.chk_filtrar_metricas, 4, 0, 1, 2)
-        
-        group_filters_layout.addWidget(QtWidgets.QLabel("Histórico do Gráfico (pts):"), 5, 0)
-        self.spin_janela_metricas = QtWidgets.QSpinBox()
-        self.spin_janela_metricas.setRange(2, 1000)
-        self.spin_janela_metricas.setValue(200)
-        self.spin_janela_metricas.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
-        self.spin_janela_metricas.valueChanged.connect(self.atualizar_tamanho_janela_metricas)
-        group_filters_layout.addWidget(self.spin_janela_metricas, 5, 1)
-        
-        self.chk_ia_usa_media_movel = QtWidgets.QCheckBox("Classificar IA com Média Móvel")
-        self.chk_ia_usa_media_movel.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
-        self.chk_ia_usa_media_movel.setChecked(False)
-        group_filters_layout.addWidget(self.chk_ia_usa_media_movel, 6, 0, 1, 2)
-        
-        group_filters_layout.addWidget(QtWidgets.QLabel("Janela da Média da IA:"), 7, 0)
-        self.spin_janela_ia = QtWidgets.QSpinBox()
-        self.spin_janela_ia.setRange(2, 100)
-        self.spin_janela_ia.setValue(50)
-        self.spin_janela_ia.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
-        group_filters_layout.addWidget(self.spin_janela_ia, 7, 1)
-        
-        scroll_content_layout.addWidget(group_filters)
-
-        # 3. Grupo de Registro e Rotulagem (Dataset com RadioButtons)
-        group_record = CollapsibleGroupBox("Rotulagem e Gravação de Amostras")
-        group_record_layout = QtWidgets.QGridLayout()
-        group_record.setLayout(group_record_layout)
-
-        group_record_layout.addWidget(QtWidgets.QLabel("ID / Nº Cupom:"), 0, 0)
-        self.edit_id_amostra = QtWidgets.QLineEdit("0")
-        group_record_layout.addWidget(self.edit_id_amostra, 0, 1)
-
-        # Label de Material
-        lbl_mat = QtWidgets.QLabel("Material:")
-        lbl_mat.setStyleSheet("font-weight: bold; color: #a0a0b2;")
-        group_record_layout.addWidget(lbl_mat, 1, 0)
-        
-        # Estilo premium para os radio buttons
-        radio_stylesheet = """
-            QRadioButton {
-                color: #e1e1e6;
-                font-size: 9pt;
-                padding: 2px;
-            }
-            QRadioButton::indicator {
-                width: 14px;
-                height: 14px;
-                border-radius: 7px;
-            }
-            QRadioButton::indicator::unchecked {
-                border: 1px solid #55555a;
-                background-color: #2c2c2e;
-            }
-            QRadioButton::indicator::checked {
-                border: 1px solid #2ecc71;
-                background-color: #2ecc71;
-            }
-        """
-        self.radio_stylesheet = radio_stylesheet
-        self.group_mat = QtWidgets.QButtonGroup(self)
-
-        # Grid para RadioButtons de Material (Dinâmico)
-        self.widget_mat_radios = QtWidgets.QWidget()
-        self.layout_mat_radios = QtWidgets.QGridLayout(self.widget_mat_radios)
-        self.layout_mat_radios.setContentsMargins(0, 0, 0, 0)
-        self.layout_mat_radios.setSpacing(6)
-        
-        # Container principal de Material (Aba 1)
-        widget_mat_container = QtWidgets.QWidget()
-        layout_mat_container = QtWidgets.QVBoxLayout(widget_mat_container)
-        layout_mat_container.setContentsMargins(0, 5, 0, 5)
-        layout_mat_container.setSpacing(8)
-        layout_mat_container.addWidget(self.widget_mat_radios)
-        
-        # Controles para Adicionar/Remover material customizado
-        layout_mat_controles = QtWidgets.QHBoxLayout()
-        layout_mat_controles.setSpacing(4)
-        
-        self.edit_novo_material = QtWidgets.QLineEdit()
-        self.edit_novo_material.setPlaceholderText("Novo Material...")
-        self.edit_novo_material.setStyleSheet("background-color: #2e2e32; color: white; border: 1px solid #3a3a3c; border-radius: 4px; padding: 4px; font-size: 8pt;")
-        self.edit_novo_material.setMaximumWidth(150)
-        
-        self.btn_add_material = QtWidgets.QPushButton("+ Add")
-        self.btn_add_material.clicked.connect(self.adicionar_material_customizado)
-        self.btn_add_material.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 8pt; border-radius: 4px; padding: 4px;")
-        
-        self.btn_del_material = QtWidgets.QPushButton("- Del")
-        self.btn_del_material.clicked.connect(self.remover_material_selecionado)
-        self.btn_del_material.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; font-size: 8pt; border-radius: 4px; padding: 4px;")
-        
-        layout_mat_controles.addWidget(self.edit_novo_material)
-        layout_mat_controles.addWidget(self.btn_add_material)
-        layout_mat_controles.addWidget(self.btn_del_material)
-        layout_mat_container.addLayout(layout_mat_controles)
-        
-        group_record_layout.addWidget(widget_mat_container, 1, 1)
-
-        # Label de Classe
-        lbl_cls = QtWidgets.QLabel("Classe:")
-        lbl_cls.setStyleSheet("font-weight: bold; color: #a0a0b2;")
-        group_record_layout.addWidget(lbl_cls, 2, 0)
-        
-        # Grid para RadioButtons de Classe
-        widget_cls_radios = QtWidgets.QWidget()
-        layout_cls_radios = QtWidgets.QGridLayout(widget_cls_radios)
-        layout_cls_radios.setContentsMargins(0, 5, 0, 5)
-        layout_cls_radios.setSpacing(6)
-        
-        self.rad_cls_saudavel = QtWidgets.QRadioButton("Saudável")
-        self.rad_cls_leve = QtWidgets.QRadioButton("Leve")
-        self.rad_cls_moderada = QtWidgets.QRadioButton("Moderada")
-        self.rad_cls_avancada = QtWidgets.QRadioButton("Avançada")
-        self.rad_cls_corroido = QtWidgets.QRadioButton("Corroído")
-        self.rad_cls_ar = QtWidgets.QRadioButton("Ar Livre")
-        
-        self.rad_cls_saudavel.setStyleSheet(radio_stylesheet)
-        self.rad_cls_leve.setStyleSheet(radio_stylesheet)
-        self.rad_cls_moderada.setStyleSheet(radio_stylesheet)
-        self.rad_cls_avancada.setStyleSheet(radio_stylesheet)
-        self.rad_cls_corroido.setStyleSheet(radio_stylesheet)
-        self.rad_cls_ar.setStyleSheet(radio_stylesheet)
-        
-        self.group_cls = QtWidgets.QButtonGroup(self)
-        self.group_cls.addButton(self.rad_cls_saudavel)
-        self.group_cls.addButton(self.rad_cls_leve)
-        self.group_cls.addButton(self.rad_cls_moderada)
-        self.group_cls.addButton(self.rad_cls_avancada)
-        self.group_cls.addButton(self.rad_cls_corroido)
-        self.group_cls.addButton(self.rad_cls_ar)
-        
-        self.rad_cls_saudavel.setChecked(True)
-        
-        layout_cls_radios.addWidget(self.rad_cls_saudavel, 0, 0)
-        layout_cls_radios.addWidget(self.rad_cls_leve, 0, 1)
-        layout_cls_radios.addWidget(self.rad_cls_moderada, 1, 0)
-        layout_cls_radios.addWidget(self.rad_cls_avancada, 1, 1)
-        layout_cls_radios.addWidget(self.rad_cls_corroido, 2, 0)
-        layout_cls_radios.addWidget(self.rad_cls_ar, 2, 1)
-        
-        group_record_layout.addWidget(widget_cls_radios, 2, 1)
-
-        # Conecta eventos para coerência Ar Livre
-        self.rad_cls_ar.toggled.connect(self.ao_toggle_ar_livre_classe)
-
-        # Novo Checkbox para gravar Média Móvel da curva em vez do dado instantâneo
-        self.chk_salvar_media_movel = QtWidgets.QCheckBox("Gravar Média Móvel (Filtro 10 amostras)")
-        self.chk_salvar_media_movel.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
-        self.chk_salvar_media_movel.setChecked(True)
-        self.chk_salvar_media_movel.stateChanged.connect(self.ao_alterar_filtro_media_movel)
-        group_record_layout.addWidget(self.chk_salvar_media_movel, 3, 0, 1, 2)
-
-        self.btn_salvar_registro = QtWidgets.QPushButton("Gravar Medição no CSV")
-        self.btn_salvar_registro.clicked.connect(self.salvar_dados_em_csv)
-        self.btn_salvar_registro.setMinimumHeight(30)
-        self.btn_salvar_registro.setStyleSheet("background-color: #f1c40f; color: black; font-weight: bold; font-size: 11pt;")
-        group_record_layout.addWidget(self.btn_salvar_registro, 4, 0, 1, 2)
-
-        # Layout horizontal para gravações múltiplas (10, 100, 1000)
-        layout_multi_salvar = QtWidgets.QHBoxLayout()
-        
-        self.btn_salvar_10 = QtWidgets.QPushButton("Gravar 10")
-        self.btn_salvar_10.clicked.connect(lambda: self.iniciar_coleta_sequencial(10))
-        self.btn_salvar_10.setMinimumHeight(25)
-        self.btn_salvar_10.setStyleSheet("background-color: #9b59b6; color: white; font-weight: bold; font-size: 10pt;")
-        
-        self.btn_salvar_100 = QtWidgets.QPushButton("Gravar 100")
-        self.btn_salvar_100.clicked.connect(lambda: self.iniciar_coleta_sequencial(100))
-        self.btn_salvar_100.setMinimumHeight(25)
-        self.btn_salvar_100.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; font-size: 10pt;")
-        
-        self.btn_salvar_1000 = QtWidgets.QPushButton("Gravar 1000")
-        self.btn_salvar_1000.clicked.connect(lambda: self.iniciar_coleta_sequencial(1000))
-        self.btn_salvar_1000.setMinimumHeight(25)
-        self.btn_salvar_1000.setStyleSheet("background-color: #6c3483; color: white; font-weight: bold; font-size: 10pt;")
-        
-        layout_multi_salvar.addWidget(self.btn_salvar_10)
-        layout_multi_salvar.addWidget(self.btn_salvar_100)
-        layout_multi_salvar.addWidget(self.btn_salvar_1000)
-        
-        group_record_layout.addLayout(layout_multi_salvar, 5, 0, 1, 2)
-
-        scroll_content_layout.addWidget(group_record)
-
-        # 4. Painel de Status das Métricas (Display Grande)
-        group_metrics = CollapsibleGroupBox("Métricas em Tempo Real")
-        group_metrics_layout = QtWidgets.QGridLayout()
-        group_metrics.setLayout(group_metrics_layout)
-
-        lbl_tau_txt = QtWidgets.QLabel("Tau (\u03c4):")
-        lbl_tau_txt.setStyleSheet("font-size: 11pt; color: #a0a0b2;")
-        self.lbl_tau_val = QtWidgets.QLabel("0.00 \u03bcs")
-        self.lbl_tau_val.setStyleSheet("font-size: 18pt; font-weight: bold; color: #2ecc71;")
-
-        lbl_tau_ma_txt = QtWidgets.QLabel("Média Móvel \u03c4 (10):")
-        lbl_tau_ma_txt.setStyleSheet("font-size: 9pt; color: #7f8c8d; font-style: italic;")
-        self.lbl_tau_ma_val = QtWidgets.QLabel("0.00 \u03bcs")
-        self.lbl_tau_ma_val.setStyleSheet("font-size: 14pt; font-weight: bold; color: #27ae60; font-style: italic;")
-
-        lbl_auc_txt = QtWidgets.QLabel("AUC:")
-        lbl_auc_txt.setStyleSheet("font-size: 11pt; color: #a0a0b2;")
-        self.lbl_auc_val = QtWidgets.QLabel("0.0")
-        self.lbl_auc_val.setStyleSheet("font-size: 18pt; font-weight: bold; color: #3498db;")
-
-        lbl_auc_ma_txt = QtWidgets.QLabel("Média Móvel AUC:")
-        lbl_auc_ma_txt.setStyleSheet("font-size: 9pt; color: #7f8c8d; font-style: italic;")
-        self.lbl_auc_ma_val = QtWidgets.QLabel("0.0")
-        self.lbl_auc_ma_val.setStyleSheet("font-size: 14pt; font-weight: bold; color: #2980b9; font-style: italic;")
-
-        group_metrics_layout.addWidget(lbl_tau_txt, 0, 0)
-        group_metrics_layout.addWidget(self.lbl_tau_val, 0, 1)
-        group_metrics_layout.addWidget(lbl_tau_ma_txt, 1, 0)
-        group_metrics_layout.addWidget(self.lbl_tau_ma_val, 1, 1)
-        group_metrics_layout.addWidget(lbl_auc_txt, 2, 0)
-        group_metrics_layout.addWidget(self.lbl_auc_val, 2, 1)
-        group_metrics_layout.addWidget(lbl_auc_ma_txt, 3, 0)
-        group_metrics_layout.addWidget(self.lbl_auc_ma_val, 3, 1)
-
-        scroll_content_layout.addWidget(group_metrics)
-
-        # 4.5. Painel de Classificação Inteligente em Tempo Real (IA)
-        group_classif = CollapsibleGroupBox("Classificação do Cupom (IA)")
-        group_classif_layout = QtWidgets.QGridLayout()
-        group_classif.setLayout(group_classif_layout)
-        
-        lbl_cls_material_txt = QtWidgets.QLabel("Material Detectado:")
-        lbl_cls_material_txt.setStyleSheet("font-size: 10pt; color: #a0a0b2;")
-        self.lbl_cls_material_val = QtWidgets.QLabel("Desconhecido")
-        self.lbl_cls_material_val.setStyleSheet("font-size: 11pt; font-weight: bold; color: #f1c40f;")
-        
-        lbl_cls_degrad_txt = QtWidgets.QLabel("Estado / Degradação:")
-        lbl_cls_degrad_txt.setStyleSheet("font-size: 10pt; color: #a0a0b2;")
-        self.lbl_cls_degrad_val = QtWidgets.QLabel("Aguardando Leitura")
-        self.lbl_cls_degrad_val.setStyleSheet("font-size: 13pt; font-weight: bold; color: #7f8c8d;")
-        
-        lbl_cls_conf_txt = QtWidgets.QLabel("Confiança da IA:")
-        lbl_cls_conf_txt.setStyleSheet("font-size: 9pt; color: #7f8c8d; font-style: italic;")
-        self.lbl_cls_conf_val = QtWidgets.QLabel("0.0%")
-        self.lbl_cls_conf_val.setStyleSheet("font-size: 10pt; font-weight: bold; color: #3498db; font-style: italic;")
-        
-        group_classif_layout.addWidget(lbl_cls_material_txt, 0, 0)
-        group_classif_layout.addWidget(self.lbl_cls_material_val, 0, 1)
-        group_classif_layout.addWidget(lbl_cls_degrad_txt, 1, 0)
-        group_classif_layout.addWidget(self.lbl_cls_degrad_val, 1, 1)
-        group_classif_layout.addWidget(lbl_cls_conf_txt, 2, 0)
-        group_classif_layout.addWidget(self.lbl_cls_conf_val, 2, 1)
-        
-        scroll_content_layout.addWidget(group_classif)
-
-        # 5. Grupo de Filtros de Visualização do Gráfico de Tendência
-        group_view = CollapsibleGroupBox("Filtros do Gráfico de Tendência")
-        group_view_layout = QtWidgets.QVBoxLayout()
-        group_view.setLayout(group_view_layout)
-        
-        self.chk_show_tau = QtWidgets.QCheckBox("Mostrar Tendência de Tau (Verde)")
-        self.chk_show_tau.setChecked(True)
-        self.chk_show_tau.stateChanged.connect(self.atualizar_visibilidade_tendencias)
-        group_view_layout.addWidget(self.chk_show_tau)
-        
-        self.chk_show_tau_ma = QtWidgets.QCheckBox("Mostrar Média Móvel de Tau (Verde Tracejado)")
-        self.chk_show_tau_ma.setChecked(True)
-        self.chk_show_tau_ma.stateChanged.connect(self.atualizar_visibilidade_tendencias)
-        group_view_layout.addWidget(self.chk_show_tau_ma)
-        
-        self.chk_show_auc = QtWidgets.QCheckBox("Mostrar Tendência de AUC (Azul)")
-        self.chk_show_auc.setChecked(True)
-        self.chk_show_auc.stateChanged.connect(self.atualizar_visibilidade_tendencias)
-        group_view_layout.addWidget(self.chk_show_auc)
-        
-        self.chk_show_auc_ma = QtWidgets.QCheckBox("Mostrar Média Móvel de AUC (Azul Tracejado)")
-        self.chk_show_auc_ma.setChecked(True)
-        self.chk_show_auc_ma.stateChanged.connect(self.atualizar_visibilidade_tendencias)
-        group_view_layout.addWidget(self.chk_show_auc_ma)
-        
-        scroll_content_layout.addWidget(group_view)
-
-        # 6. Lista de Registros Coletados na Sessão (com opção de limpar visualmente)
-        layout_titulo_hist = QtWidgets.QHBoxLayout()
-        lbl_titulo_hist = QtWidgets.QLabel("Histórico de Amostras Gravadas:")
-        lbl_titulo_hist.setStyleSheet("font-weight: bold; color: #a0a0b2;")
-        layout_titulo_hist.addWidget(lbl_titulo_hist)
-        
-        self.btn_limpar_historico_visual = QtWidgets.QPushButton("Limpar Visual")
-        self.btn_limpar_historico_visual.clicked.connect(self.limpar_historico_visual)
-        self.btn_limpar_historico_visual.setStyleSheet("background-color: #2c2c2e; color: #e1e1e6; font-size: 8pt; border: 1px solid #444; max-width: 90px; padding: 2px;")
-        layout_titulo_hist.addWidget(self.btn_limpar_historico_visual)
-        
-        scroll_content_layout.addLayout(layout_titulo_hist)
-        
-        self.list_historico = QtWidgets.QTextEdit()
-        self.list_historico.setReadOnly(True)
-        self.list_historico.setStyleSheet("background-color: #1c1c1e; color: #e1e1e6; font-family: Consolas; font-size: 9pt;")
-        self.list_historico.setMinimumHeight(150)
-        scroll_content_layout.addWidget(self.list_historico)
-
-        # 6. Botão para limpar a tela
-        self.btn_limpar_dataset = QtWidgets.QPushButton("Excluir / Filtrar Dados CSV")
-        self.btn_limpar_dataset.clicked.connect(self.excluir_csv_local)
-        self.btn_limpar_dataset.setStyleSheet("background-color: #c0392b; color: white;")
-        scroll_content_layout.addWidget(self.btn_limpar_dataset)
-
-        tab_acq_layout.addWidget(panel_left)
-
-        # =====================================================================
-        # PAINEL DIREITO: Gráficos em Tempo Real (pyqtgraph)
-        # =====================================================================
-        self.win_plots = pg.GraphicsLayoutWidget()
-        tab_acq_layout.addWidget(self.win_plots)
-
-        # Subplot 1: Curva Bruta Completa do ADC
-        self.plot_bruto = self.win_plots.addPlot(title="Sinal Bruto Completo do ADC (256 pontos)")
-        self.plot_bruto.showGrid(x=True, y=True)
-        self.plot_bruto.setLabel('left', 'Amplitude', 'Counts')
-        self.plot_bruto.setLabel('bottom', 'Índice de Amostragem')
-        self.plot_bruto.setYRange(0, 65535)
-        self.curve_bruto = self.plot_bruto.plot(pen=pg.mkPen('#3498db', width=2))
-        
-        # Linhas de auxílio visual
-        self.line_peak = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen('#e74c3c', style=QtCore.Qt.DashLine))
-        self.line_offset = pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen('#95a5a6', style=QtCore.Qt.DashLine))
-        self.plot_bruto.addItem(self.line_peak)
-        self.plot_bruto.addItem(self.line_offset)
-
-        self.win_plots.nextRow()
-
-        # Subplot 2: Decaimento Transiente Alinhado (Subtraído Offset)
-        self.plot_decay = self.win_plots.addPlot(title="Transiente de Decaimento Alinhado (Delta Counts)")
-        self.plot_decay.showGrid(x=True, y=True)
-        self.plot_decay.setLabel('left', 'Delta Counts')
-        self.plot_decay.setLabel('bottom', 'Tempo', 'us')
-        self.plot_decay.setYRange(0, 50000)
-        self.curve_decay = self.plot_decay.plot(pen=pg.mkPen('#2ecc71', width=2))
-
-        self.win_plots.nextRow()
-
-        # Subplot 3: Tendência Temporal de AUC e Tau
-        self.plot_trend = self.win_plots.addPlot(title="Tendência de Leituras em Tempo Real (Modo Contínuo)")
-        self.plot_trend.showGrid(x=True, y=True)
-        self.plot_trend.setLabel('left', 'Tau (us)', color='#2ecc71')
-        self.plot_trend.setLabel('bottom', 'Número de Leituras')
-        self.curve_trend_tau = self.plot_trend.plot(pen=pg.mkPen('#2ecc71', width=2), name="Tau")
-        
-        # Curva de Média Móvel para Tau (Verde tracejado mais espesso)
-        self.curve_trend_tau_ma = self.plot_trend.plot(
-            pen=pg.mkPen('#2ecc71', width=3, style=QtCore.Qt.DashLine), 
-            name="Tau MA"
-        )
-        
-        # Eixo y secundário para AUC no mesmo gráfico
-        self.trend_auc_axis = pg.ViewBox()
-        self.plot_trend.scene().addItem(self.trend_auc_axis)
-        self.plot_trend.getAxis('right').linkToView(self.trend_auc_axis)
-        self.plot_trend.getAxis('right').setLabel('AUC (Counts.us)', color='#3498db')
-        self.trend_auc_axis.setXLink(self.plot_trend.vb)
-        self.curve_trend_auc = pg.PlotCurveItem(pen=pg.mkPen('#3498db', width=2), name="AUC")
-        self.trend_auc_axis.addItem(self.curve_trend_auc)
-        
-        # Curva de Média Móvel para AUC (Azul tracejado mais espesso)
-        self.curve_trend_auc_ma = pg.PlotCurveItem(
-            pen=pg.mkPen('#3498db', width=3, style=QtCore.Qt.DashLine), 
-            name="AUC MA"
-        )
-        self.trend_auc_axis.addItem(self.curve_trend_auc_ma)
-
-        self.plot_trend.vb.sigResized.connect(self.ajustar_viewbox_secundaria)
-
-        # =====================================================================
-        # ABA 2: Análise Estatística (Offline)
-        # =====================================================================
-        self.tab_stats = QtWidgets.QWidget()
-        self.tab_widget.addTab(self.tab_stats, "Análise Estatística (Offline)")
-        tab_stats_layout = QtWidgets.QHBoxLayout(self.tab_stats)
-        
-        # Sub-painel Esquerdo: Botões e Relatório de Texto
-        stats_left = QtWidgets.QWidget()
-        stats_left.setMaximumWidth(420)
-        stats_left_layout = QtWidgets.QVBoxLayout(stats_left)
-        
-        self.btn_run_analysis = QtWidgets.QPushButton("Executar Análise Estatística")
-        self.btn_run_analysis.setMinimumHeight(50)
-        self.btn_run_analysis.setStyleSheet("background-color: #9b59b6; color: white; font-weight: bold; font-size: 11pt;")
-        self.btn_run_analysis.clicked.connect(self.rodar_analise_estatistica)
-        stats_left_layout.addWidget(self.btn_run_analysis)
-        
-        stats_left_layout.addWidget(QtWidgets.QLabel("Relatório Estatístico (Console):"))
-        self.txt_report_stats = QtWidgets.QTextEdit()
-        self.txt_report_stats.setReadOnly(True)
-        self.txt_report_stats.setStyleSheet("background-color: #1c1c1e; color: #e1e1e6; font-family: Consolas; font-size: 10pt;")
-        stats_left_layout.addWidget(self.txt_report_stats)
-        
-        # Painel de Filtros de Exibição (Canto Inferior Esquerdo, acima das legendas)
-        group_filters = QtWidgets.QGroupBox("Filtros de Exibição")
-        group_filters_layout = QtWidgets.QGridLayout(group_filters)
-        group_filters.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                margin-top: 12px;
-                font-weight: bold;
-                color: #e1e1e6;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 3px 0 3px;
-            }
-            QCheckBox {
-                font-size: 9pt;
-                color: #e1e1e6;
-            }
-        """)
-
-        # Filtros de Materiais (Dinâmico)
-        group_filters_layout.addWidget(QtWidgets.QLabel("<b>Materiais:</b>"), 0, 0)
-        self.widget_filter_materiais = QtWidgets.QWidget()
-        self.layout_filter_materiais = QtWidgets.QVBoxLayout(self.widget_filter_materiais)
-        self.layout_filter_materiais.setContentsMargins(0, 5, 0, 5)
-        self.layout_filter_materiais.setSpacing(6)
-        group_filters_layout.addWidget(self.widget_filter_materiais, 1, 0, 6, 1)
-
-        # Filtros de Classes
-        group_filters_layout.addWidget(QtWidgets.QLabel("<b>Classes:</b>"), 0, 1)
-        self.chk_filter_saudavel = QtWidgets.QCheckBox("Saudável")
-        self.chk_filter_saudavel.setChecked(True)
-        self.chk_filter_leve = QtWidgets.QCheckBox("Leve")
-        self.chk_filter_leve.setChecked(True)
-        self.chk_filter_moderada = QtWidgets.QCheckBox("Moderada")
-        self.chk_filter_moderada.setChecked(True)
-        self.chk_filter_avancada = QtWidgets.QCheckBox("Avançada")
-        self.chk_filter_avancada.setChecked(True)
-        self.chk_filter_corroido = QtWidgets.QCheckBox("Corroído")
-        self.chk_filter_corroido.setChecked(True)
-        self.chk_filter_ar_cls = QtWidgets.QCheckBox("Ar Livre")
-        self.chk_filter_ar_cls.setChecked(True)
-
-        group_filters_layout.addWidget(self.chk_filter_saudavel, 1, 1)
-        group_filters_layout.addWidget(self.chk_filter_leve, 2, 1)
-        group_filters_layout.addWidget(self.chk_filter_moderada, 3, 1)
-        group_filters_layout.addWidget(self.chk_filter_avancada, 4, 1)
-        group_filters_layout.addWidget(self.chk_filter_corroido, 5, 1)
-        group_filters_layout.addWidget(self.chk_filter_ar_cls, 6, 1)
-        
-        self.chk_filter_outliers = QtWidgets.QCheckBox("Remover Outliers (IQR)")
-        self.chk_filter_outliers.setChecked(False)
-        group_filters_layout.addWidget(self.chk_filter_outliers, 7, 0, 1, 2)
-
-        self.chk_diferenciar_ids_tonalidade = QtWidgets.QCheckBox("Diferenciar Tonalidades por ID")
-        self.chk_diferenciar_ids_tonalidade.setToolTip("Altera a tonalidade (luminosidade HSL) dos pontos para diferenciar IDs de amostras distintos dentro do mesmo material/classe")
-        self.chk_diferenciar_ids_tonalidade.setChecked(False)
-        group_filters_layout.addWidget(self.chk_diferenciar_ids_tonalidade, 8, 0, 1, 2)
-
-        # Conecta os sinais de mudança para atualizar os gráficos dinamicamente
-        self.chk_filter_saudavel.stateChanged.connect(self.atualizar_graficos_estatisticos)
-        self.chk_filter_leve.stateChanged.connect(self.atualizar_graficos_estatisticos)
-        self.chk_filter_moderada.stateChanged.connect(self.atualizar_graficos_estatisticos)
-        self.chk_filter_avancada.stateChanged.connect(self.atualizar_graficos_estatisticos)
-        self.chk_filter_corroido.stateChanged.connect(self.atualizar_graficos_estatisticos)
-        self.chk_filter_ar_cls.stateChanged.connect(self.atualizar_graficos_estatisticos)
-        self.chk_filter_outliers.stateChanged.connect(self.atualizar_graficos_estatisticos)
-        self.chk_diferenciar_ids_tonalidade.stateChanged.connect(self.atualizar_graficos_estatisticos)
-
-        stats_left_layout.addWidget(group_filters)
-        
-        # Painel de Legenda / Índice dos Gráficos (Canto Inferior Esquerdo)
-        group_legend = QtWidgets.QGroupBox("Legenda dos Gráficos (Índice)")
-        group_legend_layout = QtWidgets.QGridLayout(group_legend)
-        group_legend.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                margin-top: 12px;
-                font-weight: bold;
-                color: #e1e1e6;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 3px 0 3px;
-            }
-            QLabel {
-                font-size: 9pt;
-            }
-        """)
-
-        # Seção de Formas / Materiais
-        lbl_formas_header = QtWidgets.QLabel("<b>Formas (Materiais):</b>")
-        group_legend_layout.addWidget(lbl_formas_header, 0, 0, 1, 2)
-        
-        lbl_comum = QtWidgets.QLabel("<span style='font-size: 12pt;'>⚪</span> A36 Comum (Círculo)")
-        lbl_ge = QtWidgets.QLabel("<span style='font-size: 12pt;'>⏹️</span> A36 GE - Galv. Eletrolítico (Quadrado)")
-        lbl_gf = QtWidgets.QLabel("<span style='font-size: 12pt;'>🔶</span> A36 GF - Galv. a Fogo (Losango)")
-        
-        group_legend_layout.addWidget(lbl_comum, 1, 0, 1, 2)
-        group_legend_layout.addWidget(lbl_ge, 2, 0, 1, 2)
-        group_legend_layout.addWidget(lbl_gf, 3, 0, 1, 2)
-        
-        # Divisor horizontal
-        line = QtWidgets.QFrame()
-        line.setFrameShape(QtWidgets.QFrame.HLine)
-        line.setFrameShadow(QtWidgets.QFrame.Sunken)
-        line.setStyleSheet("background-color: #3a3a3c;")
-        group_legend_layout.addWidget(line, 4, 0, 1, 2)
-        
-        # Seção de Cores / Classes
-        lbl_cores_header = QtWidgets.QLabel("<b>Cores (Degradação):</b>")
-        group_legend_layout.addWidget(lbl_cores_header, 5, 0, 1, 2)
-        
-        lbl_saudavel = QtWidgets.QLabel("<span style='color: #3498db; font-size: 12pt;'>●</span> Saudável")
-        lbl_leve = QtWidgets.QLabel("<span style='color: #1abc9c; font-size: 12pt;'>●</span> Leve")
-        lbl_moderada = QtWidgets.QLabel("<span style='color: #f1c40f; font-size: 12pt;'>●</span> Moderada")
-        lbl_avancada = QtWidgets.QLabel("<span style='color: #e67e22; font-size: 12pt;'>●</span> Avançada")
-        lbl_corroido = QtWidgets.QLabel("<span style='color: #e74c3c; font-size: 12pt;'>●</span> Corroído")
-        
-        group_legend_layout.addWidget(lbl_saudavel, 6, 0)
-        group_legend_layout.addWidget(lbl_leve, 6, 1)
-        group_legend_layout.addWidget(lbl_moderada, 7, 0)
-        group_legend_layout.addWidget(lbl_avancada, 7, 1)
-        group_legend_layout.addWidget(lbl_corroido, 8, 0, 1, 2)
-
-        stats_left_layout.addWidget(group_legend)
-        
-        tab_stats_layout.addWidget(stats_left)
-        
-        # Sub-painel Direito: Gráficos Estatísticos usando pyqtgraph
-        self.win_stats_plots = pg.GraphicsLayoutWidget()
-        self.win_stats_plots.setStyleSheet("background-color: #121214; border: 1px solid #3a3a3c;")
-        tab_stats_layout.addWidget(self.win_stats_plots, 1)
-
-        # 1. Subplot Superior Esquerdo: Sinais Médios
-        self.plot_stat_curves = self.win_stats_plots.addPlot(title="Sinais Médios de Decaimento (Média ± DP)")
-        self.plot_stat_curves.addLegend(offset=(10, 10))
-        self.plot_stat_curves.showGrid(x=True, y=True)
-        self.plot_stat_curves.setLabel('left', 'Delta Counts')
-        self.plot_stat_curves.setLabel('bottom', 'Tempo', 'us')
-
-        # 2. Subplot Superior Direito: Distribuição de AUC
-        self.plot_stat_auc = self.win_stats_plots.addPlot(title="Distribuição da Área sob a Curva (AUC)")
-        self.plot_stat_auc.showGrid(x=True, y=True)
-        self.plot_stat_auc.setLabel('left', 'AUC')
-        self.plot_stat_auc.getAxis('bottom').setTicks([[(1.0, 'Saudável'), (2.0, 'Corroído')]])
-
-        self.win_stats_plots.nextRow()
-
-        # 3. Subplot Inferior Esquerdo: Distribuição de Tau
-        self.plot_stat_tau = self.win_stats_plots.addPlot(title="Distribuição da Constante de Tempo (Tau)")
-        self.plot_stat_tau.showGrid(x=True, y=True)
-        self.plot_stat_tau.setLabel('left', 'Tau', 'us')
-        self.plot_stat_tau.getAxis('bottom').setTicks([[(1.0, 'Saudável'), (2.0, 'Corroído')]])
-
-        # 4. Subplot Inferior Direito: Espaço de Características
-        self.plot_stat_scatter = self.win_stats_plots.addPlot(title="Espaço de Características: AUC vs Tau")
-        self.plot_stat_scatter.showGrid(x=True, y=True)
-        self.plot_stat_scatter.setLabel('left', 'AUC')
-        self.plot_stat_scatter.setLabel('bottom', 'Tau', 'us')
-
-        # Conecta o sinal de movimento do mouse para exibir tooltips dinâmicos nos pontos
-        self.win_stats_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_estatistico)
-
-        # Tooltip flutuante personalizado (QLabel) para sobrepor nos gráficos estatísticos
-        self.tooltip_estatistico = QtWidgets.QLabel(self)
-        self.tooltip_estatistico.setStyleSheet("""
-            background-color: #2e2e32;
-            color: #ffffff;
-            border: 2px solid #55555a;
-            border-radius: 5px;
-            padding: 8px;
-            font-size: 10pt;
-            font-family: 'Segoe UI', Arial, sans-serif;
-        """)
-        self.tooltip_estatistico.setVisible(False)
-        self.tooltip_estatistico.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
-
-        # =====================================================================
-        # ABA 3: Ensaios de Validação (Acurácia da IA)
-        # =====================================================================
-        self.tab_validacao = QtWidgets.QWidget()
-        self.tab_widget.addTab(self.tab_validacao, "Ensaios de Validação (IA)")
-        tab_val_layout = QtWidgets.QHBoxLayout(self.tab_validacao)
-        
-        # Sub-painel Esquerdo: Configuração do Teste
-        val_left = QtWidgets.QWidget()
-        val_left.setMaximumWidth(420)
-        val_left_layout = QtWidgets.QVBoxLayout(val_left)
-        val_left_layout.setContentsMargins(0, 0, 0, 0)
-        val_left_layout.setSpacing(10)
-        
-        # Scroll Area para o painel esquerdo da validação (assim como na Aba 1)
-        val_scroll = QtWidgets.QScrollArea()
-        val_scroll.setWidgetResizable(True)
-        val_scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
-        val_scroll_widget = QtWidgets.QWidget()
-        val_scroll_widget.setStyleSheet("background-color: transparent;")
-        val_scroll_layout = QtWidgets.QVBoxLayout(val_scroll_widget)
-        val_scroll_layout.setContentsMargins(0, 0, 8, 0)
-        val_scroll_layout.setSpacing(12)
-        val_scroll.setWidget(val_scroll_widget)
-        val_left_layout.addWidget(val_scroll)
-        
-        # Grupo 1: Dados Reais do Cupom
-        group_val_cupom = QtWidgets.QGroupBox("Dados Reais do Cupom")
-        group_val_cupom.setStyleSheet("""
-            QGroupBox {
-                border: 2px solid #3a3a3c;
-                border-radius: 8px;
-                margin-top: 15px;
-                font-weight: bold;
-                color: #f1c40f;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        """)
-        val_cupom_layout = QtWidgets.QGridLayout(group_val_cupom)
-        val_cupom_layout.setSpacing(8)
-        
-        # ID do Cupom
-        lbl_val_id = QtWidgets.QLabel("Nº Cupom Real:")
-        lbl_val_id.setStyleSheet("font-weight: bold; color: #a0a0b2;")
-        self.edit_val_id = QtWidgets.QLineEdit()
-        self.edit_val_id.setPlaceholderText("Ex: 101")
-        self.edit_val_id.setStyleSheet("background-color: #2e2e32; color: white; border: 1px solid #3a3a3c; border-radius: 4px; padding: 4px;")
-        val_cupom_layout.addWidget(lbl_val_id, 0, 0)
-        val_cupom_layout.addWidget(self.edit_val_id, 0, 1)
-        
-        # Material Real (RadioButtons - Dinâmico)
-        lbl_val_mat = QtWidgets.QLabel("Material Real:")
-        lbl_val_mat.setStyleSheet("font-weight: bold; color: #a0a0b2;")
-        val_cupom_layout.addWidget(lbl_val_mat, 1, 0)
-        
-        self.widget_val_mat_radios = QtWidgets.QWidget()
-        self.layout_val_mat_radios = QtWidgets.QGridLayout(self.widget_val_mat_radios)
-        self.layout_val_mat_radios.setContentsMargins(0, 5, 0, 5)
-        self.layout_val_mat_radios.setSpacing(6)
-        val_cupom_layout.addWidget(self.widget_val_mat_radios, 1, 1)
-        self.group_val_mat = QtWidgets.QButtonGroup(self)
-        
-        # Classe Real (RadioButtons)
-        lbl_val_cls = QtWidgets.QLabel("Classe Real:")
-        lbl_val_cls.setStyleSheet("font-weight: bold; color: #a0a0b2;")
-        val_cupom_layout.addWidget(lbl_val_cls, 2, 0)
-        
-        widget_val_cls_radios = QtWidgets.QWidget()
-        layout_val_cls_radios = QtWidgets.QGridLayout(widget_val_cls_radios)
-        layout_val_cls_radios.setContentsMargins(0, 5, 0, 5)
-        layout_val_cls_radios.setSpacing(6)
-        
-        self.rad_val_cls_saudavel = QtWidgets.QRadioButton("Saudável")
-        self.rad_val_cls_leve = QtWidgets.QRadioButton("Leve")
-        self.rad_val_cls_moderada = QtWidgets.QRadioButton("Moderada")
-        self.rad_val_cls_avancada = QtWidgets.QRadioButton("Avançada")
-        self.rad_val_cls_corroido = QtWidgets.QRadioButton("Corroído")
-        self.rad_val_cls_ar = QtWidgets.QRadioButton("Ar Livre")
-        
-        self.rad_val_cls_saudavel.setStyleSheet(radio_stylesheet)
-        self.rad_val_cls_leve.setStyleSheet(radio_stylesheet)
-        self.rad_val_cls_moderada.setStyleSheet(radio_stylesheet)
-        self.rad_val_cls_avancada.setStyleSheet(radio_stylesheet)
-        self.rad_val_cls_corroido.setStyleSheet(radio_stylesheet)
-        self.rad_val_cls_ar.setStyleSheet(radio_stylesheet)
-        
-        self.group_val_cls = QtWidgets.QButtonGroup(self)
-        self.group_val_cls.addButton(self.rad_val_cls_saudavel)
-        self.group_val_cls.addButton(self.rad_val_cls_leve)
-        self.group_val_cls.addButton(self.rad_val_cls_moderada)
-        self.group_val_cls.addButton(self.rad_val_cls_avancada)
-        self.group_val_cls.addButton(self.rad_val_cls_corroido)
-        self.group_val_cls.addButton(self.rad_val_cls_ar)
-        self.rad_val_cls_saudavel.setChecked(True)
-        
-        layout_val_cls_radios.addWidget(self.rad_val_cls_saudavel, 0, 0)
-        layout_val_cls_radios.addWidget(self.rad_val_cls_leve, 0, 1)
-        layout_val_cls_radios.addWidget(self.rad_val_cls_moderada, 1, 0)
-        layout_val_cls_radios.addWidget(self.rad_val_cls_avancada, 1, 1)
-        layout_val_cls_radios.addWidget(self.rad_val_cls_corroido, 2, 0)
-        layout_val_cls_radios.addWidget(self.rad_val_cls_ar, 2, 1)
-        val_cupom_layout.addWidget(widget_val_cls_radios, 2, 1)
-        
-        # Conecta eventos Ar Livre
-        self.rad_val_cls_ar.toggled.connect(self.ao_toggle_ar_livre_val_classe)
-        
-        val_scroll_layout.addWidget(group_val_cupom)
-        
-        # Grupo 2: Configuração de Tempo
-        group_val_tempo = QtWidgets.QGroupBox("Duração do Teste de Validação")
-        group_val_tempo.setStyleSheet("""
-            QGroupBox {
-                border: 2px solid #3a3a3c;
-                border-radius: 8px;
-                margin-top: 15px;
-                font-weight: bold;
-                color: #9b59b6;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        """)
-        val_tempo_layout = QtWidgets.QVBoxLayout(group_val_tempo)
-        val_tempo_layout.setSpacing(8)
-        
-        self.combo_val_duracao = QtWidgets.QComboBox()
-        self.combo_val_duracao.addItems(["Contínuo (Manual)", "1 segundo", "10 segundos", "30 segundos", "60 segundos"])
-        self.combo_val_duracao.setStyleSheet("""
-            QComboBox {
-                background-color: #2e2e32;
-                color: white;
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                padding: 6px;
-                font-size: 10pt;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-        """)
-        val_tempo_layout.addWidget(self.combo_val_duracao)
-        val_scroll_layout.addWidget(group_val_tempo)
-        
-        # Grupo 3: Ações e Controles
-        group_val_control = QtWidgets.QGroupBox("Controle do Teste")
-        group_val_control.setStyleSheet("""
-            QGroupBox {
-                border: 2px solid #3a3a3c;
-                border-radius: 8px;
-                margin-top: 15px;
-                font-weight: bold;
-                color: #e74c3c;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        """)
-        val_control_layout = QtWidgets.QVBoxLayout(group_val_control)
-        val_control_layout.setSpacing(10)
-        
-        self.btn_val_iniciar = QtWidgets.QPushButton("Iniciar Teste")
-        self.btn_val_iniciar.clicked.connect(self.iniciar_ensaio_validacao)
-        self.btn_val_iniciar.setMinimumHeight(45)
-        self.btn_val_iniciar.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt;")
-        
-        self.btn_val_finalizar = QtWidgets.QPushButton("Finalizar Teste")
-        self.btn_val_finalizar.clicked.connect(self.finalizar_ensaio_validacao)
-        self.btn_val_finalizar.setMinimumHeight(45)
-        self.btn_val_finalizar.setEnabled(False)
-        self.btn_val_finalizar.setStyleSheet("background-color: #7f8c8d; color: white; font-weight: bold; font-size: 11pt;")
-        
-        self.lbl_val_status = QtWidgets.QLabel("Status: Pronto")
-        self.lbl_val_status.setStyleSheet("color: #e1e1e6; font-size: 10pt; font-weight: bold;")
-        self.lbl_val_timer = QtWidgets.QLabel("Tempo Restante: -- s")
-        self.lbl_val_timer.setStyleSheet("color: #a0a0b2; font-size: 10pt;")
-        
-        self.progress_val = QtWidgets.QProgressBar()
-        self.progress_val.setValue(0)
-        self.progress_val.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                text-align: center;
-                background-color: #121214;
-                color: white;
-            }
-            QProgressBar::chunk {
-                background-color: #9b59b6;
-            }
-        """)
-        
-        val_control_layout.addWidget(self.btn_val_iniciar)
-        val_control_layout.addWidget(self.btn_val_finalizar)
-        val_control_layout.addWidget(self.lbl_val_status)
-        val_control_layout.addWidget(self.lbl_val_timer)
-        val_control_layout.addWidget(self.progress_val)
-        val_scroll_layout.addWidget(group_val_control)
-        
-        tab_val_layout.addWidget(val_left)
-        
-        # Sub-painel Direito: Tabela, Cards e Console
-        val_right = QtWidgets.QWidget()
-        val_right_layout = QtWidgets.QVBoxLayout(val_right)
-        val_right_layout.setContentsMargins(0, 0, 0, 0)
-        val_right_layout.setSpacing(12)
-        
-        # Cards Superiores de Acurácia (Layout Horizontal)
-        layout_val_cards = QtWidgets.QHBoxLayout()
-        
-        self.card_val_capturas = QtWidgets.QWidget()
-        self.card_val_capturas.setStyleSheet("background-color: #2e2e32; border: 1px solid #3a3a3c; border-radius: 6px;")
-        layout_card1 = QtWidgets.QVBoxLayout(self.card_val_capturas)
-        layout_card1.setContentsMargins(10, 8, 10, 8)
-        lbl_c1_title = QtWidgets.QLabel("AMOSTRAS CAPTURADAS")
-        lbl_c1_title.setStyleSheet("font-size: 8pt; color: #a0a0b2; font-weight: bold;")
-        self.lbl_c1_val = QtWidgets.QLabel("0")
-        self.lbl_c1_val.setStyleSheet("font-size: 16pt; color: #ffffff; font-weight: bold;")
-        layout_card1.addWidget(lbl_c1_title)
-        layout_card1.addWidget(self.lbl_c1_val)
-        
-        self.card_val_acuracia_mat = QtWidgets.QWidget()
-        self.card_val_acuracia_mat.setStyleSheet("background-color: #2e2e32; border: 1px solid #3a3a3c; border-radius: 6px;")
-        layout_card2 = QtWidgets.QVBoxLayout(self.card_val_acuracia_mat)
-        layout_card2.setContentsMargins(10, 8, 10, 8)
-        lbl_c2_title = QtWidgets.QLabel("ACURÁCIA MATERIAL")
-        lbl_c2_title.setStyleSheet("font-size: 8pt; color: #a0a0b2; font-weight: bold;")
-        self.lbl_c2_val = QtWidgets.QLabel("0.0%")
-        self.lbl_c2_val.setStyleSheet("font-size: 16pt; color: #3498db; font-weight: bold;")
-        layout_card2.addWidget(lbl_c2_title)
-        layout_card2.addWidget(self.lbl_c2_val)
-        
-        self.card_val_acuracia_cls = QtWidgets.QWidget()
-        self.card_val_acuracia_cls.setStyleSheet("background-color: #2e2e32; border: 1px solid #3a3a3c; border-radius: 6px;")
-        layout_card3 = QtWidgets.QVBoxLayout(self.card_val_acuracia_cls)
-        layout_card3.setContentsMargins(10, 8, 10, 8)
-        lbl_c3_title = QtWidgets.QLabel("ACURÁCIA CLASSE")
-        lbl_c3_title.setStyleSheet("font-size: 8pt; color: #a0a0b2; font-weight: bold;")
-        self.lbl_c3_val = QtWidgets.QLabel("0.0%")
-        self.lbl_c3_val.setStyleSheet("font-size: 16pt; color: #2ecc71; font-weight: bold;")
-        layout_card3.addWidget(lbl_c3_title)
-        layout_card3.addWidget(self.lbl_c3_val)
-        
-        layout_val_cards.addWidget(self.card_val_capturas)
-        layout_val_cards.addWidget(self.card_val_acuracia_mat)
-        layout_val_cards.addWidget(self.card_val_acuracia_cls)
-        val_right_layout.addLayout(layout_val_cards)
-        
-        # Tabela Widget
-        self.tbl_val_resultados = QtWidgets.QTableWidget()
-        self.tbl_val_resultados.setColumnCount(9)
-        self.tbl_val_resultados.setHorizontalHeaderLabels([
-            "Amostra", "Tempo (s)", "Tau (μs)", "AUC", "Mat. Real", "Mat. Previsto", "Cls. Real", "Cls. Prevista", "Match?"
-        ])
-        self.tbl_val_resultados.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-        self.tbl_val_resultados.setStyleSheet("""
-            QTableWidget {
-                background-color: #121214;
-                color: #e1e1e6;
-                gridline-color: #2e2e32;
-                border: 1px solid #3a3a3c;
-                font-size: 9pt;
-            }
-            QHeaderView::section {
-                background-color: #2e2e32;
-                color: #ffffff;
-                padding: 4px;
-                border: 1px solid #3a3a3c;
-                font-weight: bold;
-            }
-        """)
-        val_right_layout.addWidget(self.tbl_val_resultados, 2)
-        
-        # Console de Logs e Relatório Final
-        self.console_val_relatorio = QtWidgets.QTextEdit()
-        self.console_val_relatorio.setReadOnly(True)
-        self.console_val_relatorio.setPlaceholderText("Console de Relatório de Ensaio...")
-        self.console_val_relatorio.setStyleSheet("""
-            QTextEdit {
-                background-color: #0c0c0d;
-                color: #00ff00;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 10pt;
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                padding: 6px;
-            }
-        """)
-        val_right_layout.addWidget(self.console_val_relatorio, 1)
-        
-        tab_val_layout.addWidget(val_right)
-        
-        # =====================================================================
-        # ABA 4: Diagnóstico Físico & IA (Tempo Real)
-        # =====================================================================
-        self.tab_diag = QtWidgets.QWidget()
-        self.tab_widget.addTab(self.tab_diag, "Diagnóstico Físico & IA (TR)")
-        tab_diag_layout = QtWidgets.QHBoxLayout(self.tab_diag)
-        
-        # Sub-painel Esquerdo: Controles e Cards em Tempo Real
-        diag_left = QtWidgets.QWidget()
-        diag_left.setMaximumWidth(420)
-        diag_left_layout = QtWidgets.QVBoxLayout(diag_left)
-        diag_left_layout.setContentsMargins(0, 0, 0, 0)
-        diag_left_layout.setSpacing(12)
-        
-        # Botão de Trigger Rápido
-        self.btn_diag_trigger = QtWidgets.QPushButton("Iniciar Leitura Contínua")
-        self.btn_diag_trigger.setMinimumHeight(50)
-        self.btn_diag_trigger.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
-        self.btn_diag_trigger.clicked.connect(self.alternar_trigger_diagnostico)
-        diag_left_layout.addWidget(self.btn_diag_trigger)
-        
-        # Card de Classificação em Tempo Real
-        group_diag_status = QtWidgets.QGroupBox("Resultado IA em Tempo Real")
-        group_diag_status.setStyleSheet("""
-            QGroupBox {
-                border: 2px solid #3a3a3c;
-                border-radius: 8px;
-                margin-top: 15px;
-                font-weight: bold;
-                color: #f1c40f;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        """)
-        diag_status_layout = QtWidgets.QVBoxLayout(group_diag_status)
-        diag_status_layout.setSpacing(10)
-        
-        # Labels de diagnóstico
-        self.lbl_diag_material = QtWidgets.QLabel("Material: ---")
-        self.lbl_diag_material.setStyleSheet("font-size: 13pt; font-weight: bold; color: white;")
-        self.lbl_diag_classe = QtWidgets.QLabel("Classe: ---")
-        self.lbl_diag_classe.setStyleSheet("font-size: 13pt; font-weight: bold; color: #7f8c8d;")
-        self.lbl_diag_confianca = QtWidgets.QLabel("Confiança: ---")
-        self.lbl_diag_confianca.setStyleSheet("font-size: 11pt; color: #a0a0b2;")
-        
-        diag_status_layout.addWidget(self.lbl_diag_material)
-        diag_status_layout.addWidget(self.lbl_diag_classe)
-        diag_status_layout.addWidget(self.lbl_diag_confianca)
-        diag_left_layout.addWidget(group_diag_status)
-        
-        # Card de Métricas Físicas
-        group_diag_metrics = QtWidgets.QGroupBox("Métricas Físicas do Sinal")
-        group_diag_metrics.setStyleSheet("""
-            QGroupBox {
-                border: 2px solid #3a3a3c;
-                border-radius: 8px;
-                margin-top: 15px;
-                font-weight: bold;
-                color: #3498db;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        """)
-        diag_metrics_layout = QtWidgets.QVBoxLayout(group_diag_metrics)
-        diag_metrics_layout.setSpacing(10)
-        
-        self.lbl_diag_tau = QtWidgets.QLabel("Tau (\u03bcs): ---")
-        self.lbl_diag_tau.setStyleSheet("font-size: 11pt; color: white;")
-        self.lbl_diag_auc = QtWidgets.QLabel("AUC: ---")
-        self.lbl_diag_auc.setStyleSheet("font-size: 11pt; color: white;")
-        self.lbl_diag_r2 = QtWidgets.QLabel("R\u00b2: ---")
-        self.lbl_diag_r2.setStyleSheet("font-size: 11pt; color: white;")
-        
-        diag_metrics_layout.addWidget(self.lbl_diag_tau)
-        diag_metrics_layout.addWidget(self.lbl_diag_auc)
-        diag_metrics_layout.addWidget(self.lbl_diag_r2)
-        diag_left_layout.addWidget(group_diag_metrics)
-        
-        # Espaçador vertical para empurrar os widgets para o topo
-        diag_left_layout.addStretch()
-        tab_diag_layout.addWidget(diag_left)
-        
-        # Sub-painel Direito: Gráficos de Diagnóstico em Tempo Real
-        self.win_diag_plots = pg.GraphicsLayoutWidget()
-        self.win_diag_plots.setStyleSheet("background-color: #121214; border: 1px solid #3a3a3c;")
-        tab_diag_layout.addWidget(self.win_diag_plots, 1)
-        
-        # Configurar subplots da aba de diagnóstico
-        self.plot_diag_curves = self.win_diag_plots.addPlot(title="Decaimento Comparativo: Ativo vs. Banco de Dados")
-        self.plot_diag_curves.addLegend(offset=(10, 10))
-        self.plot_diag_curves.showGrid(x=True, y=True)
-        self.plot_diag_curves.setLabel('left', 'Delta Counts')
-        self.plot_diag_curves.setLabel('bottom', 'Tempo', 'us')
-        
-        self.plot_diag_auc = self.win_diag_plots.addPlot(title="Distribuição AUC com Indicador de Leitura")
-        self.plot_diag_auc.showGrid(x=True, y=True)
-        self.plot_diag_auc.setLabel('left', 'AUC')
-        
-        self.win_diag_plots.nextRow()
-        
-        self.plot_diag_tau = self.win_diag_plots.addPlot(title="Distribuição Tau com Indicador de Leitura")
-        self.plot_diag_tau.showGrid(x=True, y=True)
-        self.plot_diag_tau.setLabel('left', 'Tau', 'us')
-        
-        self.plot_diag_scatter = self.win_diag_plots.addPlot(title="Espaço de Características: Ativo vs. DB")
-        self.plot_diag_scatter.showGrid(x=True, y=True)
-        self.plot_diag_scatter.setLabel('left', 'AUC')
-        self.plot_diag_scatter.setLabel('bottom', 'Tau', 'us')
-        
-        # =====================================================================
-        # ABA 5: Caracterização & Comparação de Bobinas (Lift-Off)
-        # =====================================================================
-        self.tab_coil_char = QtWidgets.QWidget()
-        self.tab_widget.addTab(self.tab_coil_char, "Caracterização & Comparação de Bobinas")
-        tab_coil_outer_layout = QtWidgets.QVBoxLayout(self.tab_coil_char)
-        tab_coil_outer_layout.setContentsMargins(4, 4, 4, 4)
-        tab_coil_outer_layout.setSpacing(4)
-
-        # Barra Superior de Controles da Aba 5 (Botão Esconder/Exibir Painel Lateral + Seletor de Colunas)
-        top_bar_tab5 = QtWidgets.QHBoxLayout()
-        self.btn_toggle_coil_left = QtWidgets.QPushButton("◀ Esconder Painel Lateral")
-        self.btn_toggle_coil_left.setMinimumHeight(28)
-        self.btn_toggle_coil_left.setStyleSheet("""
-            QPushButton {
-                background-color: #2c2c2e; color: #00e676; font-weight: bold; font-size: 8.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 4px 12px;
-            }
-            QPushButton:hover {
-                background-color: #3a3a3c; color: #ffffff;
-            }
-        """)
-        self.btn_toggle_coil_left.clicked.connect(self.toggle_painel_lateral_caracterizacao)
-        top_bar_tab5.addWidget(self.btn_toggle_coil_left)
-        top_bar_tab5.addSpacing(15)
-
-        opcoes_colunas = ["Auto (Dinâmico)", "1 Coluna", "2 Colunas", "3 Colunas", "4 Colunas", "5 Colunas"]
-        combo_style = """
-            QComboBox {
-                background-color: #2c2c2e; color: #00e676; border: 1px solid #3a3a3c;
-                border-radius: 4px; padding: 3px 8px; font-weight: bold; font-size: 8.5pt;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #1e1e1f; color: #ffffff; selection-background-color: #00e676; selection-color: #000000;
-            }
-        """
-
-        # 1. Seletor exclusivo para Lista de Sensores / Bobinas
-        lbl_cols_bobinas = QtWidgets.QLabel("Colunas dos Sensores:")
-        lbl_cols_bobinas.setStyleSheet("color: #29b6f6; font-size: 8.5pt; font-weight: bold;")
-        top_bar_tab5.addWidget(lbl_cols_bobinas)
-
-        self.combo_num_colunas_bobinas = QtWidgets.QComboBox()
-        self.combo_num_colunas_bobinas.addItems(opcoes_colunas)
-        self.combo_num_colunas_bobinas.setCurrentIndex(2)  # Padrão: 2 Colunas (conforme imagem oficial)
-        self.combo_num_colunas_bobinas.setStyleSheet(combo_style)
-        self.combo_num_colunas_bobinas.currentIndexChanged.connect(self.reorganizar_colunas_seletores_caracterizacao)
-        top_bar_tab5.addWidget(self.combo_num_colunas_bobinas)
-
-        top_bar_tab5.addSpacing(15)
-
-        # 2. Seletor para os Demais Seletores (Espaçadores, Cupons, Corrosão, Locais, Amostras)
-        lbl_cols_painel = QtWidgets.QLabel("Colunas dos Outros Seletores:")
-        lbl_cols_painel.setStyleSheet("color: #e1e1e6; font-size: 8.5pt; font-weight: bold;")
-        top_bar_tab5.addWidget(lbl_cols_painel)
-
-        self.combo_num_colunas_painel = QtWidgets.QComboBox()
-        self.combo_num_colunas_painel.addItems(opcoes_colunas)
-        self.combo_num_colunas_painel.setCurrentIndex(0)  # Padrão: Auto (Dinâmico)
-        self.combo_num_colunas_painel.setStyleSheet(combo_style)
-        self.combo_num_colunas_painel.currentIndexChanged.connect(self.reorganizar_colunas_seletores_caracterizacao)
-        top_bar_tab5.addWidget(self.combo_num_colunas_painel)
-
-        top_bar_tab5.addStretch()
-        tab_coil_outer_layout.addLayout(top_bar_tab5)
-
-        # Splitter Horizontal para permitir ajustar a largura do menu lateral manualmente
-        self.splitter_tab_coil = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
-        self.splitter_tab_coil.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #3a3a3c;
-                width: 6px;
-            }
-            QSplitter::handle:hover {
-                background-color: #00e676;
-            }
-        """)
-
-        # Sub-painel Esquerdo: Especificações e Controles (Scroll Area)
-        coil_left = QtWidgets.QWidget()
-        coil_left.setMinimumWidth(240)
-        coil_left_layout = QtWidgets.QVBoxLayout(coil_left)
-        coil_left_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.scroll_coil = QtWidgets.QScrollArea()
-        self.scroll_coil.setWidgetResizable(True)
-        self.scroll_coil.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        self.scroll_coil.setStyleSheet("background-color: #1e1e1e; border: none;")
-        
-        scroll_coil_content = QtWidgets.QWidget()
-        scroll_coil_layout = QtWidgets.QVBoxLayout(scroll_coil_content)
-        scroll_coil_layout.setContentsMargins(8, 8, 8, 8)
-        scroll_coil_layout.setSpacing(12)
-
-        # 1. Seleção e Cadastro de Bobinas / Sensores
-        group_coil_select = QtWidgets.QGroupBox("Seleção do Sensor / Bobina")
-        group_coil_select.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                margin-top: 12px;
-                font-weight: bold;
-                color: #29b6f6;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 3px;
-            }
-        """)
-        group_coil_select_layout = QtWidgets.QVBoxLayout(group_coil_select)
-        group_coil_select_layout.setSpacing(8)
-
-        # Botão para abrir a caixa de diálogo de cadastro/edição
-        self.btn_open_coil_dialog = QtWidgets.QPushButton("⚙️ Cadastrar / Editar Sensores")
-        self.btn_open_coil_dialog.setMinimumHeight(35)
-        self.btn_open_coil_dialog.setStyleSheet("background-color: #29b6f6; color: #000000; font-weight: bold;")
-        self.btn_open_coil_dialog.clicked.connect(self.abrir_dialogo_cadastro_bobina)
-        group_coil_select_layout.addWidget(self.btn_open_coil_dialog)
-
-        # Container para os Radio Buttons (Bullet Points) dos sensores
-        self.widget_radio_bobinas_container = QtWidgets.QWidget()
-        self.layout_radio_bobinas = QtWidgets.QGridLayout(self.widget_radio_bobinas_container)
-        self.layout_radio_bobinas.setContentsMargins(0, 0, 0, 0)
-        self.layout_radio_bobinas.setSpacing(4)
-        self.group_radio_bobinas = QtWidgets.QButtonGroup(self)
-        self.lista_widgets_radio_bobinas = []
-        
-        group_coil_select_layout.addWidget(self.widget_radio_bobinas_container)
-        scroll_coil_layout.addWidget(group_coil_select)
-
-        # 2. Exibição das Características do Sensor Selecionado (Card Colapsável / Exibir-Esconder)
-        group_coil_card = CollapsibleGroupBox("Características do Sensor Selecionado", parent=self)
-        coil_card_layout = QtWidgets.QVBoxLayout()
-        self.txt_coil_specs_card = QtWidgets.QTextEdit()
-        self.txt_coil_specs_card.setReadOnly(True)
-        self.txt_coil_specs_card.setMinimumHeight(150)
-        self.txt_coil_specs_card.setStyleSheet("""
-            QTextEdit {
-                background-color: #121214;
-                color: #00ff00;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 8.5pt;
-                border: 1px solid #2a2a2e;
-                border-radius: 4px;
-                padding: 6px;
-            }
-        """)
-        coil_card_layout.addWidget(self.txt_coil_specs_card)
-        group_coil_card.setContentLayout(coil_card_layout)
-        scroll_coil_layout.addWidget(group_coil_card)
-
-        # 3. Calculadora de Lift-Off (Espaçadores & Berço)
-        group_coil_env = QtWidgets.QGroupBox("Calculadora de Lift-Off (Espaçadores & Berço)")
-        group_coil_env.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                margin-top: 12px;
-                font-weight: bold;
-                color: #ab47bc;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 3px;
-            }
-            QCheckBox, QRadioButton {
-                color: #ffffff !important;
-                font-size: 8pt;
-                font-weight: bold;
-                spacing: 5px;
-            }
-            QCheckBox::indicator, QRadioButton::indicator {
-                width: 14px;
-                height: 14px;
-                border: 1.5px solid #888888;
-                background-color: #222225;
-                border-radius: 3px;
-            }
-            QCheckBox::indicator:hover, QRadioButton::indicator:hover {
-                border: 1.5px solid #00e676;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #00e676;
-                border: 1.5px solid #ffffff;
-            }
-            QRadioButton::indicator {
-                border-radius: 7px;
-            }
-            QRadioButton::indicator:checked {
-                background-color: #29b6f6;
-                border: 2px solid #ffffff;
-                border-radius: 7px;
-            }
-        """)
-        coil_env_layout = QtWidgets.QVBoxLayout(group_coil_env)
-        coil_env_layout.setSpacing(8)
-
-        coil_env_form = QtWidgets.QFormLayout()
-        coil_env_form.setSpacing(6)
-
-        def criar_linha_separadora():
-            line = QtWidgets.QFrame()
-            line.setFrameShape(QtWidgets.QFrame.HLine)
-            line.setFrameShadow(QtWidgets.QFrame.Sunken)
-            line.setStyleSheet("background-color: #3a3a3c; min-height: 1px; max-height: 1px; border: none; margin-top: 3px; margin-bottom: 3px;")
-            return line
-
-        # Seleção da Base Berço (Checkboxes Exclusivos, Base P Padrão, 1 Coluna Fixa)
-        self.chk_berco_maior = QtWidgets.QCheckBox("Base G (74.6x104.6mm | H=2.6mm)")
-        self.chk_berco_menor = QtWidgets.QCheckBox("Base P (52.5x74.5mm | H=2.6mm)")
-        self.chk_berco_menor.setChecked(True)
-
-        self.group_berco = QtWidgets.QButtonGroup(self)
-        self.group_berco.addButton(self.chk_berco_maior)
-        self.group_berco.addButton(self.chk_berco_menor)
-
-        self.chk_berco_maior.toggled.connect(self.calcular_liftoff_bancada)
-        self.chk_berco_menor.toggled.connect(self.calcular_liftoff_bancada)
-
-        self.layout_berco_grid = QtWidgets.QVBoxLayout()
-        self.layout_berco_grid.setSpacing(3)
-        self.layout_berco_grid.addWidget(self.chk_berco_maior)
-        self.layout_berco_grid.addWidget(self.chk_berco_menor)
-
-        coil_env_form.addRow("Modelo do Berço:", self.layout_berco_grid)
-        coil_env_form.addRow(criar_linha_separadora())
-
-        # Seleção de Espaçadores Empilhados via 4 Colunas (5mm, 4mm, 2mm, 1mm) e 2 Linhas (1x, 2x)
-        self.chk_espacador_5mm_1 = QtWidgets.QCheckBox("1x")
-        self.chk_espacador_5mm_2 = QtWidgets.QCheckBox("2x")
-        self.chk_espacador_4mm_1 = QtWidgets.QCheckBox("1x")
-        self.chk_espacador_4mm_2 = QtWidgets.QCheckBox("2x")
-        self.chk_espacador_2mm_1 = QtWidgets.QCheckBox("1x")
-        self.chk_espacador_2mm_2 = QtWidgets.QCheckBox("2x")
-        self.chk_espacador_1mm_1 = QtWidgets.QCheckBox("1x")
-        self.chk_espacador_1mm_2 = QtWidgets.QCheckBox("2x")
-
-        # Aliases para compatibilidade legada
-        self.chk_espacador_5mm = self.chk_espacador_5mm_1
-        self.chk_espacador_4mm = self.chk_espacador_4mm_1
-        self.chk_espacador_2mm = self.chk_espacador_2mm_1
-        self.chk_espacador_1mm = self.chk_espacador_1mm_1
-
-        # Conecta o comportamento mutuamente exclusivo (1x vs 2x) por espessura
-        self.chk_espacador_5mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_5mm_1, self.chk_espacador_5mm_2))
-        self.chk_espacador_5mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_5mm_2, self.chk_espacador_5mm_1))
-
-        self.chk_espacador_4mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_4mm_1, self.chk_espacador_4mm_2))
-        self.chk_espacador_4mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_4mm_2, self.chk_espacador_4mm_1))
-
-        self.chk_espacador_2mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_2mm_1, self.chk_espacador_2mm_2))
-        self.chk_espacador_2mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_2mm_2, self.chk_espacador_2mm_1))
-
-        self.chk_espacador_1mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_1mm_1, self.chk_espacador_1mm_2))
-        self.chk_espacador_1mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_1mm_2, self.chk_espacador_1mm_1))
-
-        self.widget_spacers_container = QtWidgets.QWidget()
-        layout_spacers_h = QtWidgets.QHBoxLayout(self.widget_spacers_container)
-        layout_spacers_h.setContentsMargins(0, 2, 0, 2)
-        layout_spacers_h.setSpacing(0)
-
-        espacadores_cols = [
-            ("5mm", self.chk_espacador_5mm_1, self.chk_espacador_5mm_2),
-            ("4mm", self.chk_espacador_4mm_1, self.chk_espacador_4mm_2),
-            ("2mm", self.chk_espacador_2mm_1, self.chk_espacador_2mm_2),
-            ("1mm", self.chk_espacador_1mm_1, self.chk_espacador_1mm_2),
-        ]
-
-        for idx_col, (label_txt, chk_1, chk_2) in enumerate(espacadores_cols):
-            col_widget = QtWidgets.QWidget()
-            col_layout = QtWidgets.QVBoxLayout(col_widget)
-            col_layout.setContentsMargins(8, 2, 8, 2)
-            col_layout.setSpacing(4)
-
-            lbl_title = QtWidgets.QLabel(label_txt)
-            lbl_title.setAlignment(QtCore.Qt.AlignCenter)
-            lbl_title.setStyleSheet("font-weight: bold; color: #00e676; font-size: 9pt;")
-            col_layout.addWidget(lbl_title)
-            col_layout.addWidget(chk_1)
-            col_layout.addWidget(chk_2)
-
-            layout_spacers_h.addWidget(col_widget)
-
-            if idx_col < len(espacadores_cols) - 1:
-                sep_v = QtWidgets.QFrame()
-                sep_v.setFrameShape(QtWidgets.QFrame.VLine)
-                sep_v.setFrameShadow(QtWidgets.QFrame.Sunken)
-                sep_v.setStyleSheet("background-color: rgba(255, 255, 255, 0.15); width: 1px;")
-                layout_spacers_h.addWidget(sep_v)
-
-        coil_env_form.addRow("Espaçadores:", self.widget_spacers_container)
-        coil_env_form.addRow(criar_linha_separadora())
-
-        # Distância Resultante (Calculada e Editável com Trava de Scroll e Confirmação ao Concluir Edição)
-        self.spin_liftoff_dist = QtWidgets.QDoubleSpinBox()
-        self.spin_liftoff_dist.setRange(0.0, 100.0)
-        self.spin_liftoff_dist.setSingleStep(0.5)
-        self.spin_liftoff_dist.setSuffix(" mm")
-        self.spin_liftoff_dist.setValue(0.0)
-        self.spin_liftoff_dist.wheelEvent = lambda event: event.ignore()
-        self.spin_liftoff_dist.editingFinished.connect(self.ao_concluir_edicao_spin_liftoff)
-        coil_env_form.addRow("Distância Lift-Off (d):", self.spin_liftoff_dist)
-
-        coil_env_layout.addLayout(coil_env_form)
-
-        # Label com equação do cálculo automático de Lift-Off
-        self.lbl_calculo_liftoff_info = QtWidgets.QLabel("Fórmula: d = (Espaçadores + 2.6 mm) - H_bobina")
-        self.lbl_calculo_liftoff_info.setStyleSheet("color: #f1c40f; font-size: 8.5pt; font-family: monospace;")
-        coil_env_layout.addWidget(self.lbl_calculo_liftoff_info)
-
-        scroll_coil_layout.addWidget(group_coil_env)
-
-        # 4. Seleção do Cupom / Amostra
-        group_coil_coupon = QtWidgets.QGroupBox("Seleção do Cupom / Amostra")
-        group_coil_coupon.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                margin-top: 12px;
-                font-weight: bold;
-                color: #26a69a;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 3px;
-            }
-            QCheckBox, QRadioButton {
-                color: #ffffff !important;
-                font-size: 8pt;
-                font-weight: bold;
-                spacing: 5px;
-            }
-            QCheckBox::indicator, QRadioButton::indicator {
-                width: 14px;
-                height: 14px;
-                border: 1.5px solid #888888;
-                background-color: #222225;
-                border-radius: 3px;
-            }
-            QCheckBox::indicator:hover, QRadioButton::indicator:hover {
-                border: 1.5px solid #00e676;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #00e676;
-                border: 1.5px solid #ffffff;
-            }
-        """)
-        coil_coupon_layout = QtWidgets.QVBoxLayout(group_coil_coupon)
-        coil_coupon_layout.setSpacing(8)
-
-        coil_coupon_form = QtWidgets.QFormLayout()
-        coil_coupon_form.setSpacing(6)
-
-        # 1º Item: ID da Amostra (Limitado a no máximo 3 caracteres conforme o novo padrão)
-        self.edit_coil_sample_id = QtWidgets.QLineEdit("1")
-        self.edit_coil_sample_id.setMaxLength(3)
-        self.edit_coil_sample_id.setToolTip("O ID da Amostra é limitado a no máximo 3 caracteres (ex: 001, 012, 100)")
-        self.edit_coil_sample_id.textChanged.connect(self.ao_validar_limite_id_amostra)
-        coil_coupon_form.addRow("ID da Amostra (Max 3):", self.edit_coil_sample_id)
-        coil_coupon_form.addRow(criar_linha_separadora())
-
-        # 2º Item: Cupom / Material por Checkboxes (Exclusivos)
-        self.chk_materiais = {}
-        self.group_materiais = QtWidgets.QButtonGroup(self)
-        self.widget_mat_container = QtWidgets.QWidget()
-        self.layout_mat_grid = QtWidgets.QGridLayout(self.widget_mat_container)
-        self.layout_mat_grid.setContentsMargins(0, 0, 0, 0)
-        self.layout_mat_grid.setSpacing(3)
-        self.lista_widgets_materiais = []
-
-        materiais_lista = self.carregar_lista_materiais()
-        for idx_m, mat_nome in enumerate(materiais_lista):
-            chk = QtWidgets.QCheckBox(mat_nome)
-            self.chk_materiais[mat_nome] = chk
-            self.group_materiais.addButton(chk)
-            self.lista_widgets_materiais.append(chk)
-            if idx_m == 0:
-                chk.setChecked(True)
-            self.layout_mat_grid.addWidget(chk, idx_m // 3, idx_m % 3)
-
-        coil_coupon_form.addRow("Cupom / Material:", self.widget_mat_container)
-        self.group_materiais.buttonClicked.connect(self.ao_alterar_material_caracterizacao)
-        coil_coupon_form.addRow(criar_linha_separadora())
-
-        # 3º Item: Seleção de Estado de Corrosão por Checkboxes (Exclusivos)
-        self.chk_classes = {}
-        self.group_classes = QtWidgets.QButtonGroup(self)
-        self.widget_cls_container = QtWidgets.QWidget()
-        self.layout_cls_grid = QtWidgets.QGridLayout(self.widget_cls_container)
-        self.layout_cls_grid.setContentsMargins(0, 0, 0, 0)
-        self.layout_cls_grid.setSpacing(3)
-        self.lista_widgets_classes = []
-
-        classes_lista = ["Ar Livre", "Saudável", "Leve", "Moderada", "Avançada", "Corroído"]
-        for idx_c, cls_nome in enumerate(classes_lista):
-            chk = QtWidgets.QCheckBox(cls_nome)
-            self.chk_classes[cls_nome] = chk
-            self.group_classes.addButton(chk)
-            self.lista_widgets_classes.append(chk)
-            if cls_nome == "Saudável":
-                chk.setChecked(True)
-            self.layout_cls_grid.addWidget(chk, idx_c // 3, idx_c % 3)
-
-        coil_coupon_form.addRow("Estado de Corrosão:", self.widget_cls_container)
-        self.group_classes.buttonClicked.connect(self.ao_alterar_classe_caracterizacao)
-        coil_coupon_form.addRow(criar_linha_separadora())
-
-        # 4º Item: Checkboxes para Seleção do Local da Amostra
-        self.chk_locais = {}
-        locais_opcoes = ["São Paulo", "Ceara", "Venancio", "Caxias", "Rosario", "Senai", "Branco"]
-        self.widget_locais_container = QtWidgets.QWidget()
-        self.layout_locais_grid = QtWidgets.QGridLayout(self.widget_locais_container)
-        self.layout_locais_grid.setContentsMargins(0, 0, 0, 0)
-        self.layout_locais_grid.setSpacing(3)
-        self.lista_widgets_locais = []
-        for idx_l, nome_l in enumerate(locais_opcoes):
-            chk = QtWidgets.QCheckBox(nome_l)
-            self.chk_locais[nome_l] = chk
-            self.lista_widgets_locais.append(chk)
-            self.layout_locais_grid.addWidget(chk, idx_l // 3, idx_l % 3)
-
-        coil_coupon_form.addRow("Local da Amostra:", self.widget_locais_container)
-        coil_coupon_layout.addLayout(coil_coupon_form)
-
-        scroll_coil_layout.addWidget(group_coil_coupon)
-
-        # 5. Botões de Gravação e Gerenciamento
-        group_coil_actions = QtWidgets.QGroupBox("Ações & Gravação de Testes")
-        group_coil_actions.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                margin-top: 12px;
-                font-weight: bold;
-                color: #e1e1e6;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 3px;
-            }
-            QCheckBox, QRadioButton {
-                color: #ffffff !important;
-                font-size: 8pt;
-                font-weight: bold;
-                spacing: 5px;
-            }
-            QCheckBox::indicator, QRadioButton::indicator {
-                width: 14px;
-                height: 14px;
-                border: 1.5px solid #888888;
-                background-color: #222225;
-                border-radius: 3px;
-            }
-            QCheckBox::indicator:hover, QRadioButton::indicator:hover {
-                border: 1.5px solid #00e676;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #00e676;
-                border: 1.5px solid #ffffff;
-            }
-        """)
-        coil_actions_layout = QtWidgets.QVBoxLayout(group_coil_actions)
-        coil_actions_layout.setSpacing(8)
-
-        lbl_num_amostras = QtWidgets.QLabel("Qtd Amostras / Arquivo:")
-        lbl_num_amostras.setStyleSheet("color: #e1e1e6; font-weight: bold; font-size: 8.5pt;")
-        coil_actions_layout.addWidget(lbl_num_amostras)
-
-        self.chk_num_amostras = {}
-        self.group_num_amostras = QtWidgets.QButtonGroup(self)
-        self.widget_num_amostras_container = QtWidgets.QWidget()
-        self.layout_num_amostras_grid = QtWidgets.QGridLayout(self.widget_num_amostras_container)
-        self.layout_num_amostras_grid.setContentsMargins(0, 0, 0, 0)
-        self.layout_num_amostras_grid.setSpacing(4)
-        self.lista_widgets_num_amostras = []
-
-        opcoes_amostras = [
-            ("1 Amostra", 1),
-            ("10 Amostras", 10),
-            ("100 Amostras", 100),
-            ("1000 Amostras", 1000)
-        ]
-
-        for idx_a, (label_a, val_a) in enumerate(opcoes_amostras):
-            chk = QtWidgets.QCheckBox(label_a)
-            chk.setProperty("val_n", val_a)
-            self.chk_num_amostras[val_a] = chk
-            self.group_num_amostras.addButton(chk)
-            self.lista_widgets_num_amostras.append(chk)
-            if val_a == 1:
-                chk.setChecked(True)
-            self.layout_num_amostras_grid.addWidget(chk, idx_a // 3, idx_a % 3)
-
-        coil_actions_layout.addWidget(self.widget_num_amostras_container)
-
-        self.btn_record_coil_test = QtWidgets.QPushButton("Gravar Ensaio de Caracterização")
-        self.btn_record_coil_test.setMinimumHeight(45)
-        self.btn_record_coil_test.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 10pt;")
-        self.btn_record_coil_test.clicked.connect(self.gravar_ensaio_caracterizacao)
-        coil_actions_layout.addWidget(self.btn_record_coil_test)
-
-        self.btn_import_coil_csvs = QtWidgets.QPushButton("Importar Testes CSV")
-        self.btn_import_coil_csvs.setMinimumHeight(38)
-        self.btn_import_coil_csvs.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold; font-size: 10pt;")
-        self.btn_import_coil_csvs.clicked.connect(self.importar_csvs_caracterizacao)
-        coil_actions_layout.addWidget(self.btn_import_coil_csvs)
-
-        self.btn_clear_coil_comparison = QtWidgets.QPushButton("Limpar Seleção / Gráficos")
-        self.btn_clear_coil_comparison.setMinimumHeight(35)
-        self.btn_clear_coil_comparison.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
-        self.btn_clear_coil_comparison.clicked.connect(self.limpar_comparacao_bobinas)
-        coil_actions_layout.addWidget(self.btn_clear_coil_comparison)
-
-        self.btn_plot_3d_coils = QtWidgets.QPushButton("📊 Visualizar Gráfico 3D (L x AUC x Distância)")
-        self.btn_plot_3d_coils.setMinimumHeight(40)
-        self.btn_plot_3d_coils.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; font-size: 10pt;")
-        self.btn_plot_3d_coils.clicked.connect(self.abrir_grafico_3d_caracterizacao)
-        coil_actions_layout.addWidget(self.btn_plot_3d_coils)
-
-        self.btn_export_coil_report = QtWidgets.QPushButton("Exportar Comparativo (PNG/HTML)")
-        self.btn_export_coil_report.setMinimumHeight(35)
-        self.btn_export_coil_report.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
-        self.btn_export_coil_report.clicked.connect(self.exportar_relatorio_bobinas)
-        coil_actions_layout.addWidget(self.btn_export_coil_report)
-
-        scroll_coil_layout.addWidget(group_coil_actions)
-
-        # 4. Lista de Arquivos de Teste Ativos
-        group_coil_files = QtWidgets.QGroupBox("Arquivos de Teste Importados")
-        group_coil_files.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #3a3a3c;
-                border-radius: 4px;
-                margin-top: 12px;
-                font-weight: bold;
-                color: #00e676;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 3px;
-            }
-        """)
-        coil_files_layout = QtWidgets.QVBoxLayout(group_coil_files)
-        self.list_imported_coil_files = QtWidgets.QListWidget()
-        self.list_imported_coil_files.setStyleSheet("background-color: #121214; color: #e1e1e6; font-size: 9pt;")
-        self.list_imported_coil_files.itemSelectionChanged.connect(self.atualizar_graficos_comparacao_bobinas)
-        coil_files_layout.addWidget(self.list_imported_coil_files)
-
-        scroll_coil_layout.addWidget(group_coil_files)
-
-        self.scroll_coil.setWidget(scroll_coil_content)
-        coil_left_layout.addWidget(self.scroll_coil)
-
-        # Sub-painel Direito: Container de Sub-Abas da Caracterização (Comparativos, Tempo Real, Estatística)
-        coil_right = QtWidgets.QWidget()
-        coil_right_layout = QtWidgets.QVBoxLayout(coil_right)
-        coil_right_layout.setContentsMargins(0, 0, 0, 0)
-        coil_right_layout.setSpacing(4)
-
-        self.tab_sub_caracterizacao = QtWidgets.QTabWidget()
-        self.tab_sub_caracterizacao.setStyleSheet("""
+        self.tab_widget.setStyleSheet("""
             QTabWidget::pane {
                 border: 1px solid #3a3a3c;
                 background-color: #121214;
@@ -1917,12 +562,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             QTabBar::tab {
                 background-color: #1e1e1f;
                 color: #a0a0a0;
-                padding: 6px 14px;
+                padding: 8px 16px;
                 margin-right: 2px;
                 border-top-left-radius: 4px;
                 border-top-right-radius: 4px;
                 font-weight: bold;
-                font-size: 9pt;
+                font-size: 9.5pt;
             }
             QTabBar::tab:selected {
                 background-color: #2c2c2e;
@@ -1934,153 +579,2061 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 color: #ffffff;
             }
         """)
+        outer_layout.addWidget(self.tab_widget)
 
-        # =====================================================================
-        # SUB-ABA 1: Comparativos de Lift-Off & Bobinas (Visualização Atual)
-        # =====================================================================
-        subtab_comparativo = QtWidgets.QWidget()
-        subtab_comp_layout = QtWidgets.QVBoxLayout(subtab_comparativo)
-        subtab_comp_layout.setContentsMargins(2, 2, 2, 2)
-        subtab_comp_layout.setSpacing(4)
+        if self.mode in ["all", "ai"]:
+            # Aba 1: Aquisição em Tempo Real
+            self.tab_acq = QtWidgets.QWidget()
+            self.tab_widget.addTab(self.tab_acq, "Aquisição em Tempo Real")
+            tab_acq_layout = QtWidgets.QHBoxLayout(self.tab_acq)
+    
+            # =====================================================================
+            # PAINEL LATERAL ESQUERDO: Controles e Configurações (Com Scroll Area)
+            # =====================================================================
+            panel_left = QtWidgets.QWidget()
+            panel_left.setMaximumWidth(420)
+            panel_left.setMinimumWidth(380)
+            
+            # Layout principal de panel_left que conterá apenas a scroll area
+            panel_left_outer_layout = QtWidgets.QVBoxLayout(panel_left)
+            panel_left_outer_layout.setContentsMargins(0, 0, 0, 0)
+            
+            scroll_area = QtWidgets.QScrollArea()
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            scroll_area.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+            scroll_area.setStyleSheet("""
+                QScrollArea {
+                    border: none;
+                    background-color: #1e1e1e;
+                }
+                QScrollBar:vertical {
+                    border: none;
+                    background: #121214;
+                    width: 8px;
+                    margin: 0px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #3a3a3c;
+                    min-height: 20px;
+                    border-radius: 4px;
+                }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                    border: none;
+                    background: none;
+                }
+            """)
+            
+            scroll_content = QtWidgets.QWidget()
+            scroll_content.setStyleSheet("background-color: #1e1e1e;")
+            scroll_content_layout = QtWidgets.QVBoxLayout(scroll_content)
+            scroll_content_layout.setContentsMargins(10, 10, 10, 10)
+            scroll_content_layout.setSpacing(15)
+            
+            scroll_area.setWidget(scroll_content)
+            panel_left_outer_layout.addWidget(scroll_area)
+    
+            # 1. Grupo Conectividade
+            group_conn = CollapsibleGroupBox("Conectividade Serial")
+            group_conn_layout = QtWidgets.QGridLayout()
+            group_conn.setLayout(group_conn_layout)
+            
+            group_conn_layout.addWidget(QtWidgets.QLabel("Porta COM:"), 0, 0)
+            self.combo_portas = QtWidgets.QComboBox()
+            self.atualizar_portas_disponiveis()
+            group_conn_layout.addWidget(self.combo_portas, 0, 1)
+            
+            self.btn_atualizar_portas = QtWidgets.QPushButton("Refresh")
+            self.btn_atualizar_portas.clicked.connect(self.atualizar_portas_disponiveis)
+            group_conn_layout.addWidget(self.btn_atualizar_portas, 0, 2)
+    
+            group_conn_layout.addWidget(QtWidgets.QLabel("Baud Rate:"), 1, 0)
+            self.combo_baud = QtWidgets.QComboBox()
+            self.combo_baud.addItems(["115200", "230400", "460800", "921600"])
+            self.combo_baud.setCurrentText("921600")
+            group_conn_layout.addWidget(self.combo_baud, 1, 1, 1, 2)
+    
+            self.btn_conectar = QtWidgets.QPushButton("Conectar")
+            self.btn_conectar.clicked.connect(self.alternar_conexao)
+            self.btn_conectar.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+            group_conn_layout.addWidget(self.btn_conectar, 2, 0, 1, 3)
+    
+            self.lbl_status_conn = QtWidgets.QLabel("Status: Desconectado")
+            self.lbl_status_conn.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            group_conn_layout.addWidget(self.lbl_status_conn, 3, 0, 1, 3)
+    
+            scroll_content_layout.addWidget(group_conn)
+    
+            # 2. Grupo de Aquisição de Sinais
+            group_acq = CollapsibleGroupBox("Modo de Operação")
+            group_acq_layout = QtWidgets.QVBoxLayout()
+            group_acq.setLayout(group_acq_layout)
+    
+            self.btn_single_trigger = QtWidgets.QPushButton("Disparar Leitura Única")
+            self.btn_single_trigger.clicked.connect(self.solicitar_leitura_manual)
+            self.btn_single_trigger.setMinimumHeight(30)
+            self.btn_single_trigger.setStyleSheet("font-weight: bold; background-color: #2980b9; color: white;")
+            group_acq_layout.addWidget(self.btn_single_trigger)
+    
+            self.chk_auto_trigger = QtWidgets.QCheckBox("Modo Contínuo (Auto-Trigger)")
+            self.chk_auto_trigger.stateChanged.connect(self.alternar_auto_trigger)
+            group_acq_layout.addWidget(self.chk_auto_trigger)
+    
+    
+    
+            # Campo para ajuste manual e visualização do tempo entre amostras (dt_us)
+            layout_dt_container = QtWidgets.QVBoxLayout()
+            
+            layout_dt = QtWidgets.QHBoxLayout()
+            lbl_dt = QtWidgets.QLabel("Intervalo dt Alvo (μs):")
+            lbl_dt.setStyleSheet("color: #e1e1e6; font-size: 9pt;")
+            layout_dt.addWidget(lbl_dt)
+            
+            self.spin_dt = QtWidgets.QDoubleSpinBox()
+            self.spin_dt.setDecimals(5)
+            self.spin_dt.setRange(0.00001, 10000.0)
+            self.spin_dt.setSingleStep(0.1)
+            self.spin_dt.setValue(self.dt_us)
+            self.spin_dt.valueChanged.connect(self.atualizar_dt_us)
+            self.spin_dt.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
+            self.spin_dt.setMinimumHeight(28)
+            layout_dt.addWidget(self.spin_dt)
+            layout_dt_container.addLayout(layout_dt)
+            
+            # Label para exibir o dt real calculado pelo microcontrolador
+            self.lbl_dt_medido = QtWidgets.QLabel("dt Real Medido: -- μs (-- kHz)")
+            self.lbl_dt_medido.setStyleSheet("color: #2ecc71; font-size: 8pt; font-style: italic; margin-left: 2px;")
+            layout_dt_container.addWidget(self.lbl_dt_medido)
+            
+            group_acq_layout.addLayout(layout_dt_container)
+    
+            # Campo para ajuste da Frequência de Disparo Síncrona (Hz) controlada pelo firmware
+            layout_freq = QtWidgets.QHBoxLayout()
+            lbl_freq = QtWidgets.QLabel("Frequência de Disparo (Hz):")
+            lbl_freq.setStyleSheet("color: #e1e1e6; font-size: 9pt;")
+            layout_freq.addWidget(lbl_freq)
+            
+            self.spin_freq = QtWidgets.QSpinBox()
+            self.spin_freq.setRange(5, 100) # Limites de 5 Hz a 100 Hz
+            self.spin_freq.setValue(30)     # Padrão: 30 Hz
+            self.spin_freq.setSingleStep(5)
+            self.spin_freq.valueChanged.connect(self.atualizar_frequencia_disparo)
+            self.spin_freq.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
+            self.spin_freq.setMinimumHeight(28)
+            layout_freq.addWidget(self.spin_freq)
+            group_acq_layout.addLayout(layout_freq)
+    
+            scroll_content_layout.addWidget(group_acq)
+    
+            # 2.5. Grupo de Filtros e Processamento de Sinal
+            group_filters = CollapsibleGroupBox("Filtros e Processamento de Sinal")
+            group_filters_layout = QtWidgets.QGridLayout()
+            group_filters.setLayout(group_filters_layout)
+            
+            # Filtro de Curva Bruta
+            self.chk_filtrar_curva = QtWidgets.QCheckBox("Suavizar Transiente (Curva)")
+            self.chk_filtrar_curva.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
+            self.chk_filtrar_curva.setChecked(False)
+            self.chk_filtrar_curva.stateChanged.connect(lambda: self.treinar_classificador())
+            group_filters_layout.addWidget(self.chk_filtrar_curva, 0, 0, 1, 2)
+            
+            group_filters_layout.addWidget(QtWidgets.QLabel("Janela da Curva (pts):"), 1, 0)
+            self.spin_janela_curva = QtWidgets.QSpinBox()
+            self.spin_janela_curva.setRange(1, 25)
+            self.spin_janela_curva.setValue(1)
+            self.spin_janela_curva.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
+            self.spin_janela_curva.valueChanged.connect(lambda: self.treinar_classificador())
+            group_filters_layout.addWidget(self.spin_janela_curva, 1, 1)
+            
+            self.chk_filtrar_IA = QtWidgets.QCheckBox("Treinar IA com Curvas Filtradas")
+            self.chk_filtrar_IA.setStyleSheet("color: #a0a0b2; font-size: 8pt;")
+            self.chk_filtrar_IA.setChecked(True)
+            self.chk_filtrar_IA.stateChanged.connect(lambda: self.treinar_classificador())
+            group_filters_layout.addWidget(self.chk_filtrar_IA, 2, 0, 1, 2)
+            
+            # Separador horizontal
+            line = QtWidgets.QFrame()
+            line.setFrameShape(QtWidgets.QFrame.HLine)
+            line.setFrameShadow(QtWidgets.QFrame.Sunken)
+            line.setStyleSheet("background-color: #3a3a3c; margin: 4px 0px;")
+            group_filters_layout.addWidget(line, 3, 0, 1, 2)
+            
+            # Filtro de Métricas
+            self.chk_filtrar_metricas = QtWidgets.QCheckBox("Estabilizar Gráfico de Tendências")
+            self.chk_filtrar_metricas.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
+            self.chk_filtrar_metricas.setChecked(True)
+            group_filters_layout.addWidget(self.chk_filtrar_metricas, 4, 0, 1, 2)
+            
+            group_filters_layout.addWidget(QtWidgets.QLabel("Histórico do Gráfico (pts):"), 5, 0)
+            self.spin_janela_metricas = QtWidgets.QSpinBox()
+            self.spin_janela_metricas.setRange(2, 1000)
+            self.spin_janela_metricas.setValue(200)
+            self.spin_janela_metricas.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
+            self.spin_janela_metricas.valueChanged.connect(self.atualizar_tamanho_janela_metricas)
+            group_filters_layout.addWidget(self.spin_janela_metricas, 5, 1)
+            
+            self.chk_ia_usa_media_movel = QtWidgets.QCheckBox("Classificar IA com Média Móvel")
+            self.chk_ia_usa_media_movel.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
+            self.chk_ia_usa_media_movel.setChecked(False)
+            group_filters_layout.addWidget(self.chk_ia_usa_media_movel, 6, 0, 1, 2)
+            
+            group_filters_layout.addWidget(QtWidgets.QLabel("Janela da Média da IA:"), 7, 0)
+            self.spin_janela_ia = QtWidgets.QSpinBox()
+            self.spin_janela_ia.setRange(2, 100)
+            self.spin_janela_ia.setValue(50)
+            self.spin_janela_ia.setStyleSheet("color: white; background-color: #2e2e32; border: 1px solid #55555a; padding: 2px;")
+            group_filters_layout.addWidget(self.spin_janela_ia, 7, 1)
+            
+            scroll_content_layout.addWidget(group_filters)
+    
+            # 3. Grupo de Registro e Rotulagem (Dataset com RadioButtons)
+            group_record = CollapsibleGroupBox("Rotulagem e Gravação de Amostras")
+            group_record_layout = QtWidgets.QGridLayout()
+            group_record.setLayout(group_record_layout)
+    
+            group_record_layout.addWidget(QtWidgets.QLabel("ID / Nº Cupom:"), 0, 0)
+            self.edit_id_amostra = QtWidgets.QLineEdit("0")
+            group_record_layout.addWidget(self.edit_id_amostra, 0, 1)
+    
+            # Label de Material
+            lbl_mat = QtWidgets.QLabel("Material:")
+            lbl_mat.setStyleSheet("font-weight: bold; color: #a0a0b2;")
+            group_record_layout.addWidget(lbl_mat, 1, 0)
+            
+            # Estilo premium para os radio buttons
+            radio_stylesheet = """
+                QRadioButton {
+                    color: #e1e1e6;
+                    font-size: 9pt;
+                    padding: 2px;
+                }
+                QRadioButton::indicator {
+                    width: 14px;
+                    height: 14px;
+                    border-radius: 7px;
+                }
+                QRadioButton::indicator::unchecked {
+                    border: 1px solid #55555a;
+                    background-color: #2c2c2e;
+                }
+                QRadioButton::indicator::checked {
+                    border: 1px solid #2ecc71;
+                    background-color: #2ecc71;
+                }
+            """
+            self.radio_stylesheet = radio_stylesheet
+            self.group_mat = QtWidgets.QButtonGroup(self)
+    
+            # Grid para RadioButtons de Material (Dinâmico)
+            self.widget_mat_radios = QtWidgets.QWidget()
+            self.layout_mat_radios = QtWidgets.QGridLayout(self.widget_mat_radios)
+            self.layout_mat_radios.setContentsMargins(0, 0, 0, 0)
+            self.layout_mat_radios.setSpacing(6)
+            
+            # Container principal de Material (Aba 1)
+            widget_mat_container = QtWidgets.QWidget()
+            layout_mat_container = QtWidgets.QVBoxLayout(widget_mat_container)
+            layout_mat_container.setContentsMargins(0, 5, 0, 5)
+            layout_mat_container.setSpacing(8)
+            layout_mat_container.addWidget(self.widget_mat_radios)
+            
+            # Controles para Adicionar/Remover material customizado
+            layout_mat_controles = QtWidgets.QHBoxLayout()
+            layout_mat_controles.setSpacing(4)
+            
+            self.edit_novo_material = QtWidgets.QLineEdit()
+            self.edit_novo_material.setPlaceholderText("Novo Material...")
+            self.edit_novo_material.setStyleSheet("background-color: #2e2e32; color: white; border: 1px solid #3a3a3c; border-radius: 4px; padding: 4px; font-size: 8pt;")
+            self.edit_novo_material.setMaximumWidth(150)
+            
+            self.btn_add_material = QtWidgets.QPushButton("+ Add")
+            self.btn_add_material.clicked.connect(self.adicionar_material_customizado)
+            self.btn_add_material.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 8pt; border-radius: 4px; padding: 4px;")
+            
+            self.btn_del_material = QtWidgets.QPushButton("- Del")
+            self.btn_del_material.clicked.connect(self.remover_material_selecionado)
+            self.btn_del_material.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; font-size: 8pt; border-radius: 4px; padding: 4px;")
+            
+            layout_mat_controles.addWidget(self.edit_novo_material)
+            layout_mat_controles.addWidget(self.btn_add_material)
+            layout_mat_controles.addWidget(self.btn_del_material)
+            layout_mat_container.addLayout(layout_mat_controles)
+            
+            group_record_layout.addWidget(widget_mat_container, 1, 1)
+    
+            # Label de Classe
+            lbl_cls = QtWidgets.QLabel("Classe:")
+            lbl_cls.setStyleSheet("font-weight: bold; color: #a0a0b2;")
+            group_record_layout.addWidget(lbl_cls, 2, 0)
+            
+            # Grid para RadioButtons de Classe
+            widget_cls_radios = QtWidgets.QWidget()
+            layout_cls_radios = QtWidgets.QGridLayout(widget_cls_radios)
+            layout_cls_radios.setContentsMargins(0, 5, 0, 5)
+            layout_cls_radios.setSpacing(6)
+            
+            self.rad_cls_saudavel = QtWidgets.QRadioButton("Saudável")
+            self.rad_cls_leve = QtWidgets.QRadioButton("Leve")
+            self.rad_cls_moderada = QtWidgets.QRadioButton("Moderada")
+            self.rad_cls_avancada = QtWidgets.QRadioButton("Avançada")
+            self.rad_cls_corroido = QtWidgets.QRadioButton("Corroído")
+            self.rad_cls_ar = QtWidgets.QRadioButton("Ar Livre")
+            
+            self.rad_cls_saudavel.setStyleSheet(radio_stylesheet)
+            self.rad_cls_leve.setStyleSheet(radio_stylesheet)
+            self.rad_cls_moderada.setStyleSheet(radio_stylesheet)
+            self.rad_cls_avancada.setStyleSheet(radio_stylesheet)
+            self.rad_cls_corroido.setStyleSheet(radio_stylesheet)
+            self.rad_cls_ar.setStyleSheet(radio_stylesheet)
+            
+            self.group_cls = QtWidgets.QButtonGroup(self)
+            self.group_cls.addButton(self.rad_cls_saudavel)
+            self.group_cls.addButton(self.rad_cls_leve)
+            self.group_cls.addButton(self.rad_cls_moderada)
+            self.group_cls.addButton(self.rad_cls_avancada)
+            self.group_cls.addButton(self.rad_cls_corroido)
+            self.group_cls.addButton(self.rad_cls_ar)
+            
+            self.rad_cls_saudavel.setChecked(True)
+            
+            layout_cls_radios.addWidget(self.rad_cls_saudavel, 0, 0)
+            layout_cls_radios.addWidget(self.rad_cls_leve, 0, 1)
+            layout_cls_radios.addWidget(self.rad_cls_moderada, 1, 0)
+            layout_cls_radios.addWidget(self.rad_cls_avancada, 1, 1)
+            layout_cls_radios.addWidget(self.rad_cls_corroido, 2, 0)
+            layout_cls_radios.addWidget(self.rad_cls_ar, 2, 1)
+            
+            group_record_layout.addWidget(widget_cls_radios, 2, 1)
+    
+            # Conecta eventos para coerência Ar Livre
+            self.rad_cls_ar.toggled.connect(self.ao_toggle_ar_livre_classe)
+    
+            # Novo Checkbox para gravar Média Móvel da curva em vez do dado instantâneo
+            self.chk_salvar_media_movel = QtWidgets.QCheckBox("Gravar Média Móvel (Filtro 10 amostras)")
+            self.chk_salvar_media_movel.setStyleSheet("color: #e1e1e6; font-size: 9pt; font-weight: bold;")
+            self.chk_salvar_media_movel.setChecked(True)
+            self.chk_salvar_media_movel.stateChanged.connect(self.ao_alterar_filtro_media_movel)
+            group_record_layout.addWidget(self.chk_salvar_media_movel, 3, 0, 1, 2)
+    
+            self.btn_salvar_registro = QtWidgets.QPushButton("Gravar Medição no CSV")
+            self.btn_salvar_registro.clicked.connect(self.salvar_dados_em_csv)
+            self.btn_salvar_registro.setMinimumHeight(30)
+            self.btn_salvar_registro.setStyleSheet("background-color: #f1c40f; color: black; font-weight: bold; font-size: 11pt;")
+            group_record_layout.addWidget(self.btn_salvar_registro, 4, 0, 1, 2)
+    
+            # Layout horizontal para gravações múltiplas (10, 100, 1000)
+            layout_multi_salvar = QtWidgets.QHBoxLayout()
+            
+            self.btn_salvar_10 = QtWidgets.QPushButton("Gravar 10")
+            self.btn_salvar_10.clicked.connect(lambda: self.iniciar_coleta_sequencial(10))
+            self.btn_salvar_10.setMinimumHeight(25)
+            self.btn_salvar_10.setStyleSheet("background-color: #9b59b6; color: white; font-weight: bold; font-size: 10pt;")
+            
+            self.btn_salvar_100 = QtWidgets.QPushButton("Gravar 100")
+            self.btn_salvar_100.clicked.connect(lambda: self.iniciar_coleta_sequencial(100))
+            self.btn_salvar_100.setMinimumHeight(25)
+            self.btn_salvar_100.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; font-size: 10pt;")
+            
+            self.btn_salvar_1000 = QtWidgets.QPushButton("Gravar 1000")
+            self.btn_salvar_1000.clicked.connect(lambda: self.iniciar_coleta_sequencial(1000))
+            self.btn_salvar_1000.setMinimumHeight(25)
+            self.btn_salvar_1000.setStyleSheet("background-color: #6c3483; color: white; font-weight: bold; font-size: 10pt;")
+            
+            layout_multi_salvar.addWidget(self.btn_salvar_10)
+            layout_multi_salvar.addWidget(self.btn_salvar_100)
+            layout_multi_salvar.addWidget(self.btn_salvar_1000)
+            
+            group_record_layout.addLayout(layout_multi_salvar, 5, 0, 1, 2)
+    
+            scroll_content_layout.addWidget(group_record)
+    
+            # 4. Painel de Status das Métricas (Display Grande)
+            group_metrics = CollapsibleGroupBox("Métricas em Tempo Real")
+            group_metrics_layout = QtWidgets.QGridLayout()
+            group_metrics.setLayout(group_metrics_layout)
+    
+            lbl_tau_txt = QtWidgets.QLabel("Tau (\u03c4):")
+            lbl_tau_txt.setStyleSheet("font-size: 11pt; color: #a0a0b2;")
+            self.lbl_tau_val = QtWidgets.QLabel("0.00 \u03bcs")
+            self.lbl_tau_val.setStyleSheet("font-size: 18pt; font-weight: bold; color: #2ecc71;")
+    
+            lbl_tau_ma_txt = QtWidgets.QLabel("Média Móvel \u03c4 (10):")
+            lbl_tau_ma_txt.setStyleSheet("font-size: 9pt; color: #7f8c8d; font-style: italic;")
+            self.lbl_tau_ma_val = QtWidgets.QLabel("0.00 \u03bcs")
+            self.lbl_tau_ma_val.setStyleSheet("font-size: 14pt; font-weight: bold; color: #27ae60; font-style: italic;")
+    
+            lbl_auc_txt = QtWidgets.QLabel("AUC:")
+            lbl_auc_txt.setStyleSheet("font-size: 11pt; color: #a0a0b2;")
+            self.lbl_auc_val = QtWidgets.QLabel("0.0")
+            self.lbl_auc_val.setStyleSheet("font-size: 18pt; font-weight: bold; color: #3498db;")
+    
+            lbl_auc_ma_txt = QtWidgets.QLabel("Média Móvel AUC:")
+            lbl_auc_ma_txt.setStyleSheet("font-size: 9pt; color: #7f8c8d; font-style: italic;")
+            self.lbl_auc_ma_val = QtWidgets.QLabel("0.0")
+            self.lbl_auc_ma_val.setStyleSheet("font-size: 14pt; font-weight: bold; color: #2980b9; font-style: italic;")
+    
+            group_metrics_layout.addWidget(lbl_tau_txt, 0, 0)
+            group_metrics_layout.addWidget(self.lbl_tau_val, 0, 1)
+            group_metrics_layout.addWidget(lbl_tau_ma_txt, 1, 0)
+            group_metrics_layout.addWidget(self.lbl_tau_ma_val, 1, 1)
+            group_metrics_layout.addWidget(lbl_auc_txt, 2, 0)
+            group_metrics_layout.addWidget(self.lbl_auc_val, 2, 1)
+            group_metrics_layout.addWidget(lbl_auc_ma_txt, 3, 0)
+            group_metrics_layout.addWidget(self.lbl_auc_ma_val, 3, 1)
+    
+            scroll_content_layout.addWidget(group_metrics)
+    
+            # 4.5. Painel de Classificação Inteligente em Tempo Real (IA)
+            group_classif = CollapsibleGroupBox("Classificação do Cupom (IA)")
+            group_classif_layout = QtWidgets.QGridLayout()
+            group_classif.setLayout(group_classif_layout)
+            
+            lbl_cls_material_txt = QtWidgets.QLabel("Material Detectado:")
+            lbl_cls_material_txt.setStyleSheet("font-size: 10pt; color: #a0a0b2;")
+            self.lbl_cls_material_val = QtWidgets.QLabel("Desconhecido")
+            self.lbl_cls_material_val.setStyleSheet("font-size: 11pt; font-weight: bold; color: #f1c40f;")
+            
+            lbl_cls_degrad_txt = QtWidgets.QLabel("Estado / Degradação:")
+            lbl_cls_degrad_txt.setStyleSheet("font-size: 10pt; color: #a0a0b2;")
+            self.lbl_cls_degrad_val = QtWidgets.QLabel("Aguardando Leitura")
+            self.lbl_cls_degrad_val.setStyleSheet("font-size: 13pt; font-weight: bold; color: #7f8c8d;")
+            
+            lbl_cls_conf_txt = QtWidgets.QLabel("Confiança da IA:")
+            lbl_cls_conf_txt.setStyleSheet("font-size: 9pt; color: #7f8c8d; font-style: italic;")
+            self.lbl_cls_conf_val = QtWidgets.QLabel("0.0%")
+            self.lbl_cls_conf_val.setStyleSheet("font-size: 10pt; font-weight: bold; color: #3498db; font-style: italic;")
+            
+            group_classif_layout.addWidget(lbl_cls_material_txt, 0, 0)
+            group_classif_layout.addWidget(self.lbl_cls_material_val, 0, 1)
+            group_classif_layout.addWidget(lbl_cls_degrad_txt, 1, 0)
+            group_classif_layout.addWidget(self.lbl_cls_degrad_val, 1, 1)
+            group_classif_layout.addWidget(lbl_cls_conf_txt, 2, 0)
+            group_classif_layout.addWidget(self.lbl_cls_conf_val, 2, 1)
+            
+            scroll_content_layout.addWidget(group_classif)
+    
+            # 5. Grupo de Filtros de Visualização do Gráfico de Tendência
+            group_view = CollapsibleGroupBox("Filtros do Gráfico de Tendência")
+            group_view_layout = QtWidgets.QVBoxLayout()
+            group_view.setLayout(group_view_layout)
+            
+            self.chk_show_tau = QtWidgets.QCheckBox("Mostrar Tendência de Tau (Verde)")
+            self.chk_show_tau.setChecked(True)
+            self.chk_show_tau.stateChanged.connect(self.atualizar_visibilidade_tendencias)
+            group_view_layout.addWidget(self.chk_show_tau)
+            
+            self.chk_show_tau_ma = QtWidgets.QCheckBox("Mostrar Média Móvel de Tau (Verde Tracejado)")
+            self.chk_show_tau_ma.setChecked(True)
+            self.chk_show_tau_ma.stateChanged.connect(self.atualizar_visibilidade_tendencias)
+            group_view_layout.addWidget(self.chk_show_tau_ma)
+            
+            self.chk_show_auc = QtWidgets.QCheckBox("Mostrar Tendência de AUC (Azul)")
+            self.chk_show_auc.setChecked(True)
+            self.chk_show_auc.stateChanged.connect(self.atualizar_visibilidade_tendencias)
+            group_view_layout.addWidget(self.chk_show_auc)
+            
+            self.chk_show_auc_ma = QtWidgets.QCheckBox("Mostrar Média Móvel de AUC (Azul Tracejado)")
+            self.chk_show_auc_ma.setChecked(True)
+            self.chk_show_auc_ma.stateChanged.connect(self.atualizar_visibilidade_tendencias)
+            group_view_layout.addWidget(self.chk_show_auc_ma)
+            
+            scroll_content_layout.addWidget(group_view)
+    
+            # 6. Lista de Registros Coletados na Sessão (com opção de limpar visualmente)
+            layout_titulo_hist = QtWidgets.QHBoxLayout()
+            lbl_titulo_hist = QtWidgets.QLabel("Histórico de Amostras Gravadas:")
+            lbl_titulo_hist.setStyleSheet("font-weight: bold; color: #a0a0b2;")
+            layout_titulo_hist.addWidget(lbl_titulo_hist)
+            
+            self.btn_limpar_historico_visual = QtWidgets.QPushButton("Limpar Visual")
+            self.btn_limpar_historico_visual.clicked.connect(self.limpar_historico_visual)
+            self.btn_limpar_historico_visual.setStyleSheet("background-color: #2c2c2e; color: #e1e1e6; font-size: 8pt; border: 1px solid #444; max-width: 90px; padding: 2px;")
+            layout_titulo_hist.addWidget(self.btn_limpar_historico_visual)
+            
+            scroll_content_layout.addLayout(layout_titulo_hist)
+            
+            self.list_historico = QtWidgets.QTextEdit()
+            self.list_historico.setReadOnly(True)
+            self.list_historico.setStyleSheet("background-color: #1c1c1e; color: #e1e1e6; font-family: Consolas; font-size: 9pt;")
+            self.list_historico.setMinimumHeight(150)
+            scroll_content_layout.addWidget(self.list_historico)
+    
+            # 6. Botão para limpar a tela
+            self.btn_limpar_dataset = QtWidgets.QPushButton("Excluir / Filtrar Dados CSV")
+            self.btn_limpar_dataset.clicked.connect(self.excluir_csv_local)
+            self.btn_limpar_dataset.setStyleSheet("background-color: #c0392b; color: white;")
+            scroll_content_layout.addWidget(self.btn_limpar_dataset)
+    
+            tab_acq_layout.addWidget(panel_left)
+    
+            # =====================================================================
+            # PAINEL DIREITO: Gráficos em Tempo Real (pyqtgraph)
+            # =====================================================================
+            panel_right_acq = QtWidgets.QWidget()
+            panel_right_acq_layout = QtWidgets.QVBoxLayout(panel_right_acq)
+            panel_right_acq_layout.setContentsMargins(0, 0, 0, 0)
+            panel_right_acq_layout.setSpacing(2)
 
-        self.win_coil_plots = pg.GraphicsLayoutWidget()
-        self.win_coil_plots.setBackground('#121214')
-        self.win_coil_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_grafico_caracterizacao)
+            self.win_plots = pg.GraphicsLayoutWidget()
+            panel_right_acq_layout.addWidget(self.criar_barrafullscreen_container(self.win_plots, "Aba 1: Aquisição em Tempo Real"))
+            panel_right_acq_layout.addWidget(self.win_plots, 1)
+            tab_acq_layout.addWidget(panel_right_acq)
+    
+            # Subplot 1: Curva Bruta Completa do ADC
+            self.plot_bruto = self.win_plots.addPlot(title="Sinal Bruto Completo do ADC (256 pontos)")
+            self.plot_bruto.showGrid(x=True, y=True)
+            self.plot_bruto.setLabel('left', 'Amplitude', 'Counts')
+            self.plot_bruto.setLabel('bottom', 'Índice de Amostragem')
+            self.plot_bruto.setYRange(0, 65535)
+            self.curve_bruto = self.plot_bruto.plot(pen=pg.mkPen('#3498db', width=2))
+            
+            # Linhas de auxílio visual
+            self.line_peak = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen('#e74c3c', style=QtCore.Qt.DashLine))
+            self.line_offset = pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen('#95a5a6', style=QtCore.Qt.DashLine))
+            self.plot_bruto.addItem(self.line_peak)
+            self.plot_bruto.addItem(self.line_offset)
+    
+            self.win_plots.nextRow()
+    
+            # Subplot 2: Decaimento Transiente Alinhado (Subtraído Offset)
+            self.plot_decay = self.win_plots.addPlot(title="Transiente de Decaimento Alinhado (Delta Counts)")
+            self.plot_decay.showGrid(x=True, y=True)
+            self.plot_decay.setLabel('left', 'Delta Counts')
+            self.plot_decay.setLabel('bottom', 'Tempo', 'us')
+            self.plot_decay.setYRange(0, 50000)
+            self.curve_decay = self.plot_decay.plot(pen=pg.mkPen('#2ecc71', width=2))
+    
+            self.win_plots.nextRow()
+    
+            # Subplot 3: Tendência Temporal de AUC e Tau
+            self.plot_trend = self.win_plots.addPlot(title="Tendência de Leituras em Tempo Real (Modo Contínuo)")
+            self.plot_trend.showGrid(x=True, y=True)
+            self.plot_trend.setLabel('left', 'Tau (us)', color='#2ecc71')
+            self.plot_trend.setLabel('bottom', 'Número de Leituras')
+            self.curve_trend_tau = self.plot_trend.plot(pen=pg.mkPen('#2ecc71', width=2), name="Tau")
+            
+            # Curva de Média Móvel para Tau (Verde tracejado mais espesso)
+            self.curve_trend_tau_ma = self.plot_trend.plot(
+                pen=pg.mkPen('#2ecc71', width=3, style=QtCore.Qt.DashLine), 
+                name="Tau MA"
+            )
+            
+            # Eixo y secundário para AUC no mesmo gráfico
+            self.trend_auc_axis = pg.ViewBox()
+            self.plot_trend.scene().addItem(self.trend_auc_axis)
+            self.plot_trend.getAxis('right').linkToView(self.trend_auc_axis)
+            self.plot_trend.getAxis('right').setLabel('AUC (Counts.us)', color='#3498db')
+            self.trend_auc_axis.setXLink(self.plot_trend.vb)
+            self.curve_trend_auc = pg.PlotCurveItem(pen=pg.mkPen('#3498db', width=2), name="AUC")
+            self.trend_auc_axis.addItem(self.curve_trend_auc)
+            
+            # Curva de Média Móvel para AUC (Azul tracejado mais espesso)
+            self.curve_trend_auc_ma = pg.PlotCurveItem(
+                pen=pg.mkPen('#3498db', width=3, style=QtCore.Qt.DashLine), 
+                name="AUC MA"
+            )
+            self.trend_auc_axis.addItem(self.curve_trend_auc_ma)
+    
+            self.plot_trend.vb.sigResized.connect(self.ajustar_viewbox_secundaria)
+    
+            # =====================================================================
+            # ABA 2: Análise Estatística (Offline)
+            # =====================================================================
+            self.tab_stats = QtWidgets.QWidget()
+            self.tab_widget.addTab(self.tab_stats, "Análise Estatística (Offline)")
+            tab_stats_layout = QtWidgets.QHBoxLayout(self.tab_stats)
+            
+            # Sub-painel Esquerdo: Botões e Relatório de Texto
+            stats_left = QtWidgets.QWidget()
+            stats_left.setMaximumWidth(420)
+            stats_left_layout = QtWidgets.QVBoxLayout(stats_left)
+            
+            self.btn_run_analysis = QtWidgets.QPushButton("Executar Análise Estatística")
+            self.btn_run_analysis.setMinimumHeight(50)
+            self.btn_run_analysis.setStyleSheet("background-color: #9b59b6; color: white; font-weight: bold; font-size: 11pt;")
+            self.btn_run_analysis.clicked.connect(self.rodar_analise_estatistica)
+            stats_left_layout.addWidget(self.btn_run_analysis)
+            
+            stats_left_layout.addWidget(QtWidgets.QLabel("Relatório Estatístico (Console):"))
+            self.txt_report_stats = QtWidgets.QTextEdit()
+            self.txt_report_stats.setReadOnly(True)
+            self.txt_report_stats.setStyleSheet("background-color: #1c1c1e; color: #e1e1e6; font-family: Consolas; font-size: 10pt;")
+            stats_left_layout.addWidget(self.txt_report_stats)
+            
+            # Painel de Filtros de Exibição (Canto Inferior Esquerdo, acima das legendas)
+            group_filters = QtWidgets.QGroupBox("Filtros de Exibição")
+            group_filters_layout = QtWidgets.QGridLayout(group_filters)
+            group_filters.setStyleSheet("""
+                QGroupBox {
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    margin-top: 12px;
+                    font-weight: bold;
+                    color: #e1e1e6;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 3px 0 3px;
+                }
+                QCheckBox {
+                    font-size: 9pt;
+                    color: #e1e1e6;
+                }
+            """)
+    
+            # Filtros de Materiais (Dinâmico)
+            group_filters_layout.addWidget(QtWidgets.QLabel("<b>Materiais:</b>"), 0, 0)
+            self.widget_filter_materiais = QtWidgets.QWidget()
+            self.layout_filter_materiais = QtWidgets.QVBoxLayout(self.widget_filter_materiais)
+            self.layout_filter_materiais.setContentsMargins(0, 5, 0, 5)
+            self.layout_filter_materiais.setSpacing(6)
+            group_filters_layout.addWidget(self.widget_filter_materiais, 1, 0, 6, 1)
+    
+            # Filtros de Classes
+            group_filters_layout.addWidget(QtWidgets.QLabel("<b>Classes:</b>"), 0, 1)
+            self.chk_filter_saudavel = QtWidgets.QCheckBox("Saudável")
+            self.chk_filter_saudavel.setChecked(True)
+            self.chk_filter_leve = QtWidgets.QCheckBox("Leve")
+            self.chk_filter_leve.setChecked(True)
+            self.chk_filter_moderada = QtWidgets.QCheckBox("Moderada")
+            self.chk_filter_moderada.setChecked(True)
+            self.chk_filter_avancada = QtWidgets.QCheckBox("Avançada")
+            self.chk_filter_avancada.setChecked(True)
+            self.chk_filter_corroido = QtWidgets.QCheckBox("Corroído")
+            self.chk_filter_corroido.setChecked(True)
+            self.chk_filter_ar_cls = QtWidgets.QCheckBox("Ar Livre")
+            self.chk_filter_ar_cls.setChecked(True)
+    
+            group_filters_layout.addWidget(self.chk_filter_saudavel, 1, 1)
+            group_filters_layout.addWidget(self.chk_filter_leve, 2, 1)
+            group_filters_layout.addWidget(self.chk_filter_moderada, 3, 1)
+            group_filters_layout.addWidget(self.chk_filter_avancada, 4, 1)
+            group_filters_layout.addWidget(self.chk_filter_corroido, 5, 1)
+            group_filters_layout.addWidget(self.chk_filter_ar_cls, 6, 1)
+            
+            self.chk_filter_outliers = QtWidgets.QCheckBox("Remover Outliers (IQR)")
+            self.chk_filter_outliers.setChecked(False)
+            group_filters_layout.addWidget(self.chk_filter_outliers, 7, 0, 1, 2)
+    
+            self.chk_diferenciar_ids_tonalidade = QtWidgets.QCheckBox("Diferenciar Tonalidades por ID")
+            self.chk_diferenciar_ids_tonalidade.setToolTip("Altera a tonalidade (luminosidade HSL) dos pontos para diferenciar IDs de amostras distintos dentro do mesmo material/classe")
+            self.chk_diferenciar_ids_tonalidade.setChecked(False)
+            group_filters_layout.addWidget(self.chk_diferenciar_ids_tonalidade, 8, 0, 1, 2)
 
-        self.plot_coil_decay = self.win_coil_plots.addPlot(row=0, col=0, title="Decaimento Transiente Comparativo V(t)")
-        self.plot_coil_decay.setLabel('left', 'Tensão / ADC Counts')
-        self.plot_coil_decay.setLabel('bottom', 'Tempo (us)')
-        self.plot_coil_decay.showGrid(x=True, y=True, alpha=0.3)
+            self.chk_enable_tooltips = QtWidgets.QCheckBox("👁️ Exibir Tooltips e Destaques Visuais")
+            self.chk_enable_tooltips.setToolTip("Habilita ou desabilita a exibição de destaques visuais e balões de tooltip flutuantes nos gráficos")
+            self.chk_enable_tooltips.setChecked(True)
+            self.chk_enable_tooltips.stateChanged.connect(self.ao_alternar_exibicao_tooltips)
+            group_filters_layout.addWidget(self.chk_enable_tooltips, 9, 0, 1, 2)
 
-        self.plot_coil_tau_liftoff = self.win_coil_plots.addPlot(row=0, col=1, title="Constante de Tempo (Tau) vs Distância (Lift-Off)")
-        self.plot_coil_tau_liftoff.setLabel('left', 'Tau (us)')
-        self.plot_coil_tau_liftoff.setLabel('bottom', 'Distância (mm)')
-        self.plot_coil_tau_liftoff.showGrid(x=True, y=True, alpha=0.3)
+            # Conecta os sinais de mudança para atualizar os gráficos dinamicamente
+            self.chk_filter_saudavel.stateChanged.connect(self.atualizar_graficos_estatisticos)
+            self.chk_filter_leve.stateChanged.connect(self.atualizar_graficos_estatisticos)
+            self.chk_filter_moderada.stateChanged.connect(self.atualizar_graficos_estatisticos)
+            self.chk_filter_avancada.stateChanged.connect(self.atualizar_graficos_estatisticos)
+            self.chk_filter_corroido.stateChanged.connect(self.atualizar_graficos_estatisticos)
+            self.chk_filter_ar_cls.stateChanged.connect(self.atualizar_graficos_estatisticos)
+            self.chk_filter_outliers.stateChanged.connect(self.atualizar_graficos_estatisticos)
+            self.chk_diferenciar_ids_tonalidade.stateChanged.connect(self.atualizar_graficos_estatisticos)
 
-        self.plot_coil_auc_liftoff = self.win_coil_plots.addPlot(row=1, col=0, title="Área Sob a Curva (AUC) vs Distância (Lift-Off)")
-        self.plot_coil_auc_liftoff.setLabel('left', 'AUC (Counts.us)')
-        self.plot_coil_auc_liftoff.setLabel('bottom', 'Distância (mm)')
-        self.plot_coil_auc_liftoff.showGrid(x=True, y=True, alpha=0.3)
+            stats_left_layout.addWidget(group_filters)
+            
+            # Painel de Legenda / Índice dos Gráficos (Canto Inferior Esquerdo)
+            group_legend = QtWidgets.QGroupBox("Legenda dos Gráficos (Índice)")
+            group_legend_layout = QtWidgets.QGridLayout(group_legend)
+            group_legend.setStyleSheet("""
+                QGroupBox {
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    margin-top: 12px;
+                    font-weight: bold;
+                    color: #e1e1e6;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 3px 0 3px;
+                }
+                QLabel {
+                    font-size: 9pt;
+                }
+            """)
+    
+            # Seção de Formas / Materiais
+            lbl_formas_header = QtWidgets.QLabel("<b>Formas (Materiais):</b>")
+            group_legend_layout.addWidget(lbl_formas_header, 0, 0, 1, 2)
+            
+            lbl_comum = QtWidgets.QLabel("<span style='font-size: 12pt;'>⚪</span> A36 Comum (Círculo)")
+            lbl_ge = QtWidgets.QLabel("<span style='font-size: 12pt;'>⏹️</span> A36 GE - Galv. Eletrolítico (Quadrado)")
+            lbl_gf = QtWidgets.QLabel("<span style='font-size: 12pt;'>🔶</span> A36 GF - Galv. a Fogo (Losango)")
+            
+            group_legend_layout.addWidget(lbl_comum, 1, 0, 1, 2)
+            group_legend_layout.addWidget(lbl_ge, 2, 0, 1, 2)
+            group_legend_layout.addWidget(lbl_gf, 3, 0, 1, 2)
+            
+            # Divisor horizontal
+            line = QtWidgets.QFrame()
+            line.setFrameShape(QtWidgets.QFrame.HLine)
+            line.setFrameShadow(QtWidgets.QFrame.Sunken)
+            line.setStyleSheet("background-color: #3a3a3c;")
+            group_legend_layout.addWidget(line, 4, 0, 1, 2)
+            
+            # Seção de Cores / Classes
+            lbl_cores_header = QtWidgets.QLabel("<b>Cores (Degradação):</b>")
+            group_legend_layout.addWidget(lbl_cores_header, 5, 0, 1, 2)
+            
+            lbl_saudavel = QtWidgets.QLabel("<span style='color: #3498db; font-size: 12pt;'>●</span> Saudável")
+            lbl_leve = QtWidgets.QLabel("<span style='color: #1abc9c; font-size: 12pt;'>●</span> Leve")
+            lbl_moderada = QtWidgets.QLabel("<span style='color: #f1c40f; font-size: 12pt;'>●</span> Moderada")
+            lbl_avancada = QtWidgets.QLabel("<span style='color: #e67e22; font-size: 12pt;'>●</span> Avançada")
+            lbl_corroido = QtWidgets.QLabel("<span style='color: #e74c3c; font-size: 12pt;'>●</span> Corroído")
+            
+            group_legend_layout.addWidget(lbl_saudavel, 6, 0)
+            group_legend_layout.addWidget(lbl_leve, 6, 1)
+            group_legend_layout.addWidget(lbl_moderada, 7, 0)
+            group_legend_layout.addWidget(lbl_avancada, 7, 1)
+            group_legend_layout.addWidget(lbl_corroido, 8, 0, 1, 2)
+    
+            stats_left_layout.addWidget(group_legend)
+            
+            tab_stats_layout.addWidget(stats_left)
+            
+            # Sub-painel Direito: Gráficos Estatísticos usando pyqtgraph
+            panel_right_stats = QtWidgets.QWidget()
+            panel_right_stats_layout = QtWidgets.QVBoxLayout(panel_right_stats)
+            panel_right_stats_layout.setContentsMargins(0, 0, 0, 0)
+            panel_right_stats_layout.setSpacing(2)
 
-        self.plot_coil_l_liftoff = self.win_coil_plots.addPlot(row=1, col=1, title="Indutância Efetiva L vs Distância (Lift-Off)")
-        self.plot_coil_l_liftoff.setLabel('left', 'Indutância L (uH)')
-        self.plot_coil_l_liftoff.setLabel('bottom', 'Distância (mm)')
-        self.plot_coil_l_liftoff.showGrid(x=True, y=True, alpha=0.3)
+            self.win_stats_plots = pg.GraphicsLayoutWidget()
+            self.win_stats_plots.setStyleSheet("background-color: #121214; border: 1px solid #3a3a3c;")
+            panel_right_stats_layout.addWidget(self.criar_barrafullscreen_container(self.win_stats_plots, "Aba 2: Análise Estatística (Offline)"))
+            panel_right_stats_layout.addWidget(self.win_stats_plots, 1)
+            tab_stats_layout.addWidget(panel_right_stats, 1)
+    
+            # 1. Subplot Superior Esquerdo: Sinais Médios
+            self.plot_stat_curves = self.win_stats_plots.addPlot(title="Sinais Médios de Decaimento (Média ± DP)")
+            self.plot_stat_curves.addLegend(offset=(10, 10))
+            self.plot_stat_curves.showGrid(x=True, y=True)
+            self.plot_stat_curves.setLabel('left', 'Delta Counts')
+            self.plot_stat_curves.setLabel('bottom', 'Tempo', 'us')
+    
+            # 2. Subplot Superior Direito: Distribuição de AUC
+            self.plot_stat_auc = self.win_stats_plots.addPlot(title="Distribuição da Área sob a Curva (AUC)")
+            self.plot_stat_auc.showGrid(x=True, y=True)
+            self.plot_stat_auc.setLabel('left', 'AUC')
+            self.plot_stat_auc.getAxis('bottom').setTicks([[(1.0, 'Saudável'), (2.0, 'Corroído')]])
+    
+            self.win_stats_plots.nextRow()
+    
+            # 3. Subplot Inferior Esquerdo: Distribuição de Tau
+            self.plot_stat_tau = self.win_stats_plots.addPlot(title="Distribuição da Constante de Tempo (Tau)")
+            self.plot_stat_tau.showGrid(x=True, y=True)
+            self.plot_stat_tau.setLabel('left', 'Tau', 'us')
+            self.plot_stat_tau.getAxis('bottom').setTicks([[(1.0, 'Saudável'), (2.0, 'Corroído')]])
+    
+            # 4. Subplot Inferior Direito: Espaço de Características
+            self.plot_stat_scatter = self.win_stats_plots.addPlot(title="Espaço de Características: AUC vs Tau")
+            self.plot_stat_scatter.showGrid(x=True, y=True)
+            self.plot_stat_scatter.setLabel('left', 'AUC')
+            self.plot_stat_scatter.setLabel('bottom', 'Tau', 'us')
+    
+            # Conecta o sinal de movimento e clique do mouse para tooltips dinâmicos e fixados
+            self.win_stats_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_estatistico)
+            self.win_stats_plots.scene().sigMouseClicked.connect(self.ao_clicar_mouse_grafico)
+    
+            # Tooltip flutuante personalizado (QLabel) para sobrepor nos gráficos estatísticos
+            self.tooltip_estatistico = QtWidgets.QLabel(self)
+            self.tooltip_estatistico.setStyleSheet("""
+                background-color: #2e2e32;
+                color: #ffffff;
+                border: 2px solid #55555a;
+                border-radius: 5px;
+                padding: 8px;
+                font-size: 10pt;
+                font-family: 'Segoe UI', Arial, sans-serif;
+            """)
+            self.tooltip_estatistico.setVisible(False)
+            self.tooltip_estatistico.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
+    
+            # =====================================================================
+            # ABA 3: Ensaios de Validação (Acurácia da IA)
+            # =====================================================================
+            self.tab_validacao = QtWidgets.QWidget()
+            self.tab_widget.addTab(self.tab_validacao, "Ensaios de Validação (IA)")
+            tab_val_layout = QtWidgets.QHBoxLayout(self.tab_validacao)
+            
+            # Sub-painel Esquerdo: Configuração do Teste
+            val_left = QtWidgets.QWidget()
+            val_left.setMaximumWidth(420)
+            val_left_layout = QtWidgets.QVBoxLayout(val_left)
+            val_left_layout.setContentsMargins(0, 0, 0, 0)
+            val_left_layout.setSpacing(10)
+            
+            # Scroll Area para o painel esquerdo da validação (assim como na Aba 1)
+            val_scroll = QtWidgets.QScrollArea()
+            val_scroll.setWidgetResizable(True)
+            val_scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
+            val_scroll_widget = QtWidgets.QWidget()
+            val_scroll_widget.setStyleSheet("background-color: transparent;")
+            val_scroll_layout = QtWidgets.QVBoxLayout(val_scroll_widget)
+            val_scroll_layout.setContentsMargins(0, 0, 8, 0)
+            val_scroll_layout.setSpacing(12)
+            val_scroll.setWidget(val_scroll_widget)
+            val_left_layout.addWidget(val_scroll)
+            
+            # Grupo 1: Dados Reais do Cupom
+            group_val_cupom = QtWidgets.QGroupBox("Dados Reais do Cupom")
+            group_val_cupom.setStyleSheet("""
+                QGroupBox {
+                    border: 2px solid #3a3a3c;
+                    border-radius: 8px;
+                    margin-top: 15px;
+                    font-weight: bold;
+                    color: #f1c40f;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px;
+                }
+            """)
+            val_cupom_layout = QtWidgets.QGridLayout(group_val_cupom)
+            val_cupom_layout.setSpacing(8)
+            
+            # ID do Cupom
+            lbl_val_id = QtWidgets.QLabel("Nº Cupom Real:")
+            lbl_val_id.setStyleSheet("font-weight: bold; color: #a0a0b2;")
+            self.edit_val_id = QtWidgets.QLineEdit()
+            self.edit_val_id.setPlaceholderText("Ex: 101")
+            self.edit_val_id.setStyleSheet("background-color: #2e2e32; color: white; border: 1px solid #3a3a3c; border-radius: 4px; padding: 4px;")
+            val_cupom_layout.addWidget(lbl_val_id, 0, 0)
+            val_cupom_layout.addWidget(self.edit_val_id, 0, 1)
+            
+            # Material Real (RadioButtons - Dinâmico)
+            lbl_val_mat = QtWidgets.QLabel("Material Real:")
+            lbl_val_mat.setStyleSheet("font-weight: bold; color: #a0a0b2;")
+            val_cupom_layout.addWidget(lbl_val_mat, 1, 0)
+            
+            self.widget_val_mat_radios = QtWidgets.QWidget()
+            self.layout_val_mat_radios = QtWidgets.QGridLayout(self.widget_val_mat_radios)
+            self.layout_val_mat_radios.setContentsMargins(0, 5, 0, 5)
+            self.layout_val_mat_radios.setSpacing(6)
+            val_cupom_layout.addWidget(self.widget_val_mat_radios, 1, 1)
+            self.group_val_mat = QtWidgets.QButtonGroup(self)
+            
+            # Classe Real (RadioButtons)
+            lbl_val_cls = QtWidgets.QLabel("Classe Real:")
+            lbl_val_cls.setStyleSheet("font-weight: bold; color: #a0a0b2;")
+            val_cupom_layout.addWidget(lbl_val_cls, 2, 0)
+            
+            widget_val_cls_radios = QtWidgets.QWidget()
+            layout_val_cls_radios = QtWidgets.QGridLayout(widget_val_cls_radios)
+            layout_val_cls_radios.setContentsMargins(0, 5, 0, 5)
+            layout_val_cls_radios.setSpacing(6)
+            
+            self.rad_val_cls_saudavel = QtWidgets.QRadioButton("Saudável")
+            self.rad_val_cls_leve = QtWidgets.QRadioButton("Leve")
+            self.rad_val_cls_moderada = QtWidgets.QRadioButton("Moderada")
+            self.rad_val_cls_avancada = QtWidgets.QRadioButton("Avançada")
+            self.rad_val_cls_corroido = QtWidgets.QRadioButton("Corroído")
+            self.rad_val_cls_ar = QtWidgets.QRadioButton("Ar Livre")
+            
+            self.rad_val_cls_saudavel.setStyleSheet(radio_stylesheet)
+            self.rad_val_cls_leve.setStyleSheet(radio_stylesheet)
+            self.rad_val_cls_moderada.setStyleSheet(radio_stylesheet)
+            self.rad_val_cls_avancada.setStyleSheet(radio_stylesheet)
+            self.rad_val_cls_corroido.setStyleSheet(radio_stylesheet)
+            self.rad_val_cls_ar.setStyleSheet(radio_stylesheet)
+            
+            self.group_val_cls = QtWidgets.QButtonGroup(self)
+            self.group_val_cls.addButton(self.rad_val_cls_saudavel)
+            self.group_val_cls.addButton(self.rad_val_cls_leve)
+            self.group_val_cls.addButton(self.rad_val_cls_moderada)
+            self.group_val_cls.addButton(self.rad_val_cls_avancada)
+            self.group_val_cls.addButton(self.rad_val_cls_corroido)
+            self.group_val_cls.addButton(self.rad_val_cls_ar)
+            self.rad_val_cls_saudavel.setChecked(True)
+            
+            layout_val_cls_radios.addWidget(self.rad_val_cls_saudavel, 0, 0)
+            layout_val_cls_radios.addWidget(self.rad_val_cls_leve, 0, 1)
+            layout_val_cls_radios.addWidget(self.rad_val_cls_moderada, 1, 0)
+            layout_val_cls_radios.addWidget(self.rad_val_cls_avancada, 1, 1)
+            layout_val_cls_radios.addWidget(self.rad_val_cls_corroido, 2, 0)
+            layout_val_cls_radios.addWidget(self.rad_val_cls_ar, 2, 1)
+            val_cupom_layout.addWidget(widget_val_cls_radios, 2, 1)
+            
+            # Conecta eventos Ar Livre
+            self.rad_val_cls_ar.toggled.connect(self.ao_toggle_ar_livre_val_classe)
+            
+            val_scroll_layout.addWidget(group_val_cupom)
+            
+            # Grupo 2: Configuração de Tempo
+            group_val_tempo = QtWidgets.QGroupBox("Duração do Teste de Validação")
+            group_val_tempo.setStyleSheet("""
+                QGroupBox {
+                    border: 2px solid #3a3a3c;
+                    border-radius: 8px;
+                    margin-top: 15px;
+                    font-weight: bold;
+                    color: #9b59b6;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px;
+                }
+            """)
+            val_tempo_layout = QtWidgets.QVBoxLayout(group_val_tempo)
+            val_tempo_layout.setSpacing(8)
+            
+            self.combo_val_duracao = QtWidgets.QComboBox()
+            self.combo_val_duracao.addItems(["Contínuo (Manual)", "1 segundo", "10 segundos", "30 segundos", "60 segundos"])
+            self.combo_val_duracao.setStyleSheet("""
+                QComboBox {
+                    background-color: #2e2e32;
+                    color: white;
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    padding: 6px;
+                    font-size: 10pt;
+                }
+                QComboBox::drop-down {
+                    border: none;
+                }
+            """)
+            val_tempo_layout.addWidget(self.combo_val_duracao)
+            val_scroll_layout.addWidget(group_val_tempo)
+            
+            # Grupo 3: Ações e Controles
+            group_val_control = QtWidgets.QGroupBox("Controle do Teste")
+            group_val_control.setStyleSheet("""
+                QGroupBox {
+                    border: 2px solid #3a3a3c;
+                    border-radius: 8px;
+                    margin-top: 15px;
+                    font-weight: bold;
+                    color: #e74c3c;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px;
+                }
+            """)
+            val_control_layout = QtWidgets.QVBoxLayout(group_val_control)
+            val_control_layout.setSpacing(10)
+            
+            self.btn_val_iniciar = QtWidgets.QPushButton("Iniciar Teste")
+            self.btn_val_iniciar.clicked.connect(self.iniciar_ensaio_validacao)
+            self.btn_val_iniciar.setMinimumHeight(45)
+            self.btn_val_iniciar.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt;")
+            
+            self.btn_val_finalizar = QtWidgets.QPushButton("Finalizar Teste")
+            self.btn_val_finalizar.clicked.connect(self.finalizar_ensaio_validacao)
+            self.btn_val_finalizar.setMinimumHeight(45)
+            self.btn_val_finalizar.setEnabled(False)
+            self.btn_val_finalizar.setStyleSheet("background-color: #7f8c8d; color: white; font-weight: bold; font-size: 11pt;")
+            
+            self.lbl_val_status = QtWidgets.QLabel("Status: Pronto")
+            self.lbl_val_status.setStyleSheet("color: #e1e1e6; font-size: 10pt; font-weight: bold;")
+            self.lbl_val_timer = QtWidgets.QLabel("Tempo Restante: -- s")
+            self.lbl_val_timer.setStyleSheet("color: #a0a0b2; font-size: 10pt;")
+            
+            self.progress_val = QtWidgets.QProgressBar()
+            self.progress_val.setValue(0)
+            self.progress_val.setStyleSheet("""
+                QProgressBar {
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    text-align: center;
+                    background-color: #121214;
+                    color: white;
+                }
+                QProgressBar::chunk {
+                    background-color: #9b59b6;
+                }
+            """)
+            
+            val_control_layout.addWidget(self.btn_val_iniciar)
+            val_control_layout.addWidget(self.btn_val_finalizar)
+            val_control_layout.addWidget(self.lbl_val_status)
+            val_control_layout.addWidget(self.lbl_val_timer)
+            val_control_layout.addWidget(self.progress_val)
+            val_scroll_layout.addWidget(group_val_control)
+            
+            tab_val_layout.addWidget(val_left)
+            
+            # Sub-painel Direito: Tabela, Cards e Console
+            val_right = QtWidgets.QWidget()
+            val_right_layout = QtWidgets.QVBoxLayout(val_right)
+            val_right_layout.setContentsMargins(0, 0, 0, 0)
+            val_right_layout.setSpacing(12)
+            
+            # Cards Superiores de Acurácia (Layout Horizontal)
+            layout_val_cards = QtWidgets.QHBoxLayout()
+            
+            self.card_val_capturas = QtWidgets.QWidget()
+            self.card_val_capturas.setStyleSheet("background-color: #2e2e32; border: 1px solid #3a3a3c; border-radius: 6px;")
+            layout_card1 = QtWidgets.QVBoxLayout(self.card_val_capturas)
+            layout_card1.setContentsMargins(10, 8, 10, 8)
+            lbl_c1_title = QtWidgets.QLabel("AMOSTRAS CAPTURADAS")
+            lbl_c1_title.setStyleSheet("font-size: 8pt; color: #a0a0b2; font-weight: bold;")
+            self.lbl_c1_val = QtWidgets.QLabel("0")
+            self.lbl_c1_val.setStyleSheet("font-size: 16pt; color: #ffffff; font-weight: bold;")
+            layout_card1.addWidget(lbl_c1_title)
+            layout_card1.addWidget(self.lbl_c1_val)
+            
+            self.card_val_acuracia_mat = QtWidgets.QWidget()
+            self.card_val_acuracia_mat.setStyleSheet("background-color: #2e2e32; border: 1px solid #3a3a3c; border-radius: 6px;")
+            layout_card2 = QtWidgets.QVBoxLayout(self.card_val_acuracia_mat)
+            layout_card2.setContentsMargins(10, 8, 10, 8)
+            lbl_c2_title = QtWidgets.QLabel("ACURÁCIA MATERIAL")
+            lbl_c2_title.setStyleSheet("font-size: 8pt; color: #a0a0b2; font-weight: bold;")
+            self.lbl_c2_val = QtWidgets.QLabel("0.0%")
+            self.lbl_c2_val.setStyleSheet("font-size: 16pt; color: #3498db; font-weight: bold;")
+            layout_card2.addWidget(lbl_c2_title)
+            layout_card2.addWidget(self.lbl_c2_val)
+            
+            self.card_val_acuracia_cls = QtWidgets.QWidget()
+            self.card_val_acuracia_cls.setStyleSheet("background-color: #2e2e32; border: 1px solid #3a3a3c; border-radius: 6px;")
+            layout_card3 = QtWidgets.QVBoxLayout(self.card_val_acuracia_cls)
+            layout_card3.setContentsMargins(10, 8, 10, 8)
+            lbl_c3_title = QtWidgets.QLabel("ACURÁCIA CLASSE")
+            lbl_c3_title.setStyleSheet("font-size: 8pt; color: #a0a0b2; font-weight: bold;")
+            self.lbl_c3_val = QtWidgets.QLabel("0.0%")
+            self.lbl_c3_val.setStyleSheet("font-size: 16pt; color: #2ecc71; font-weight: bold;")
+            layout_card3.addWidget(lbl_c3_title)
+            layout_card3.addWidget(self.lbl_c3_val)
+            
+            layout_val_cards.addWidget(self.card_val_capturas)
+            layout_val_cards.addWidget(self.card_val_acuracia_mat)
+            layout_val_cards.addWidget(self.card_val_acuracia_cls)
+            val_right_layout.addLayout(layout_val_cards)
+            
+            # Tabela Widget
+            self.tbl_val_resultados = QtWidgets.QTableWidget()
+            self.tbl_val_resultados.setColumnCount(9)
+            self.tbl_val_resultados.setHorizontalHeaderLabels([
+                "Amostra", "Tempo (s)", "Tau (μs)", "AUC", "Mat. Real", "Mat. Previsto", "Cls. Real", "Cls. Prevista", "Match?"
+            ])
+            self.tbl_val_resultados.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+            self.tbl_val_resultados.setStyleSheet("""
+                QTableWidget {
+                    background-color: #121214;
+                    color: #e1e1e6;
+                    gridline-color: #2e2e32;
+                    border: 1px solid #3a3a3c;
+                    font-size: 9pt;
+                }
+                QHeaderView::section {
+                    background-color: #2e2e32;
+                    color: #ffffff;
+                    padding: 4px;
+                    border: 1px solid #3a3a3c;
+                    font-weight: bold;
+                }
+            """)
+            val_right_layout.addWidget(self.tbl_val_resultados, 2)
+            
+            # Console de Logs e Relatório Final
+            self.console_val_relatorio = QtWidgets.QTextEdit()
+            self.console_val_relatorio.setReadOnly(True)
+            self.console_val_relatorio.setPlaceholderText("Console de Relatório de Ensaio...")
+            self.console_val_relatorio.setStyleSheet("""
+                QTextEdit {
+                    background-color: #0c0c0d;
+                    color: #00ff00;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    font-size: 10pt;
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    padding: 6px;
+                }
+            """)
+            val_right_layout.addWidget(self.console_val_relatorio, 1)
+            
+            tab_val_layout.addWidget(val_right)
+            
+            # =====================================================================
+            # ABA 4: Diagnóstico Físico & IA (Tempo Real)
+            # =====================================================================
+            self.tab_diag = QtWidgets.QWidget()
+            self.tab_widget.addTab(self.tab_diag, "Diagnóstico Físico & IA (TR)")
+            tab_diag_layout = QtWidgets.QHBoxLayout(self.tab_diag)
+            
+            # Sub-painel Esquerdo: Controles e Cards em Tempo Real
+            diag_left = QtWidgets.QWidget()
+            diag_left.setMaximumWidth(420)
+            diag_left_layout = QtWidgets.QVBoxLayout(diag_left)
+            diag_left_layout.setContentsMargins(0, 0, 0, 0)
+            diag_left_layout.setSpacing(12)
+            
+            # Botão de Trigger Rápido
+            self.btn_diag_trigger = QtWidgets.QPushButton("Iniciar Leitura Contínua")
+            self.btn_diag_trigger.setMinimumHeight(50)
+            self.btn_diag_trigger.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 11pt; border-radius: 4px;")
+            self.btn_diag_trigger.clicked.connect(self.alternar_trigger_diagnostico)
+            diag_left_layout.addWidget(self.btn_diag_trigger)
+            
+            # Card de Classificação em Tempo Real
+            group_diag_status = QtWidgets.QGroupBox("Resultado IA em Tempo Real")
+            group_diag_status.setStyleSheet("""
+                QGroupBox {
+                    border: 2px solid #3a3a3c;
+                    border-radius: 8px;
+                    margin-top: 15px;
+                    font-weight: bold;
+                    color: #f1c40f;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px;
+                }
+            """)
+            diag_status_layout = QtWidgets.QVBoxLayout(group_diag_status)
+            diag_status_layout.setSpacing(10)
+            
+            # Labels de diagnóstico
+            self.lbl_diag_material = QtWidgets.QLabel("Material: ---")
+            self.lbl_diag_material.setStyleSheet("font-size: 13pt; font-weight: bold; color: white;")
+            self.lbl_diag_classe = QtWidgets.QLabel("Classe: ---")
+            self.lbl_diag_classe.setStyleSheet("font-size: 13pt; font-weight: bold; color: #7f8c8d;")
+            self.lbl_diag_confianca = QtWidgets.QLabel("Confiança: ---")
+            self.lbl_diag_confianca.setStyleSheet("font-size: 11pt; color: #a0a0b2;")
+            
+            diag_status_layout.addWidget(self.lbl_diag_material)
+            diag_status_layout.addWidget(self.lbl_diag_classe)
+            diag_status_layout.addWidget(self.lbl_diag_confianca)
+            diag_left_layout.addWidget(group_diag_status)
+            
+            # Card de Métricas Físicas
+            group_diag_metrics = QtWidgets.QGroupBox("Métricas Físicas do Sinal")
+            group_diag_metrics.setStyleSheet("""
+                QGroupBox {
+                    border: 2px solid #3a3a3c;
+                    border-radius: 8px;
+                    margin-top: 15px;
+                    font-weight: bold;
+                    color: #3498db;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 10px;
+                    padding: 0 5px;
+                }
+            """)
+            diag_metrics_layout = QtWidgets.QVBoxLayout(group_diag_metrics)
+            diag_metrics_layout.setSpacing(10)
+            
+            self.lbl_diag_tau = QtWidgets.QLabel("Tau (\u03bcs): ---")
+            self.lbl_diag_tau.setStyleSheet("font-size: 11pt; color: white;")
+            self.lbl_diag_auc = QtWidgets.QLabel("AUC: ---")
+            self.lbl_diag_auc.setStyleSheet("font-size: 11pt; color: white;")
+            self.lbl_diag_r2 = QtWidgets.QLabel("R\u00b2: ---")
+            self.lbl_diag_r2.setStyleSheet("font-size: 11pt; color: white;")
+            
+            diag_metrics_layout.addWidget(self.lbl_diag_tau)
+            diag_metrics_layout.addWidget(self.lbl_diag_auc)
+            diag_metrics_layout.addWidget(self.lbl_diag_r2)
+            diag_left_layout.addWidget(group_diag_metrics)
+            
+            # Espaçador vertical para empurrar os widgets para o topo
+            diag_left_layout.addStretch()
+            tab_diag_layout.addWidget(diag_left)
+            
+            # Sub-painel Direito: Gráficos de Diagnóstico em Tempo Real
+            panel_right_diag = QtWidgets.QWidget()
+            panel_right_diag_layout = QtWidgets.QVBoxLayout(panel_right_diag)
+            panel_right_diag_layout.setContentsMargins(0, 0, 0, 0)
+            panel_right_diag_layout.setSpacing(2)
 
-        subtab_comp_layout.addWidget(self.win_coil_plots, 2)
+            self.win_diag_plots = pg.GraphicsLayoutWidget()
+            self.win_diag_plots.setStyleSheet("background-color: #121214; border: 1px solid #3a3a3c;")
+            panel_right_diag_layout.addWidget(self.criar_barrafullscreen_container(self.win_diag_plots, "Aba 4: Diagnóstico Físico IA (Tempo Real)"))
+            panel_right_diag_layout.addWidget(self.win_diag_plots, 1)
+            tab_diag_layout.addWidget(panel_right_diag, 1)
+            
+            # Configurar subplots da aba de diagnóstico
+            self.plot_diag_curves = self.win_diag_plots.addPlot(title="Decaimento Comparativo: Ativo vs. Banco de Dados")
+            self.plot_diag_curves.addLegend(offset=(10, 10))
+            self.plot_diag_curves.showGrid(x=True, y=True)
+            self.plot_diag_curves.setLabel('left', 'Delta Counts')
+            self.plot_diag_curves.setLabel('bottom', 'Tempo', 'us')
+            
+            self.plot_diag_auc = self.win_diag_plots.addPlot(title="Distribuição AUC com Indicador de Leitura")
+            self.plot_diag_auc.showGrid(x=True, y=True)
+            self.plot_diag_auc.setLabel('left', 'AUC')
+            
+            self.win_diag_plots.nextRow()
+            
+            self.plot_diag_tau = self.win_diag_plots.addPlot(title="Distribuição Tau com Indicador de Leitura")
+            self.plot_diag_tau.showGrid(x=True, y=True)
+            self.plot_diag_tau.setLabel('left', 'Tau', 'us')
+            
+            self.plot_diag_scatter = self.win_diag_plots.addPlot(title="Espaço de Características: Ativo vs. DB")
+            self.plot_diag_scatter.showGrid(x=True, y=True)
+            self.plot_diag_scatter.setLabel('left', 'AUC')
+            self.plot_diag_scatter.setLabel('bottom', 'Tempo', 'us')
+    
+        if self.mode in ["all", "coil"]:
+            # =====================================================================
+            # ABA 5: Caracterização & Comparação de Bobinas (Lift-Off)
+            # =====================================================================
+            self.tab_coil_char = QtWidgets.QWidget()
+            self.tab_widget.addTab(self.tab_coil_char, "Caracterização & Comparação de Bobinas")
+            tab_coil_outer_layout = QtWidgets.QVBoxLayout(self.tab_coil_char)
+            tab_coil_outer_layout.setContentsMargins(4, 4, 4, 4)
+            tab_coil_outer_layout.setSpacing(4)
+    
+            # Barra Superior de Controles da Aba 5 (Botão Esconder/Exibir Painel Lateral + Seletor de Colunas)
+            top_bar_tab5 = QtWidgets.QHBoxLayout()
+            self.btn_toggle_coil_left = QtWidgets.QPushButton("◀ Esconder Painel Lateral")
+            self.btn_toggle_coil_left.setMinimumHeight(28)
+            self.btn_toggle_coil_left.setStyleSheet("""
+                QPushButton {
+                    background-color: #2c2c2e; color: #00e676; font-weight: bold; font-size: 8.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 4px 12px;
+                }
+                QPushButton:hover {
+                    background-color: #3a3a3c; color: #ffffff;
+                }
+            """)
+            self.btn_toggle_coil_left.clicked.connect(self.toggle_painel_lateral_caracterizacao)
+            top_bar_tab5.addWidget(self.btn_toggle_coil_left)
+            top_bar_tab5.addSpacing(15)
+    
+            opcoes_colunas = ["Auto (Dinâmico)", "1 Coluna", "2 Colunas", "3 Colunas", "4 Colunas", "5 Colunas"]
+            combo_style = """
+                QComboBox {
+                    background-color: #2c2c2e; color: #00e676; border: 1px solid #3a3a3c;
+                    border-radius: 4px; padding: 3px 8px; font-weight: bold; font-size: 8.5pt;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #1e1e1f; color: #ffffff; selection-background-color: #00e676; selection-color: #000000;
+                }
+            """
+    
+            # 1. Seletor exclusivo para Lista de Sensores / Bobinas
+            lbl_cols_bobinas = QtWidgets.QLabel("Colunas dos Sensores:")
+            lbl_cols_bobinas.setStyleSheet("color: #29b6f6; font-size: 8.5pt; font-weight: bold;")
+            top_bar_tab5.addWidget(lbl_cols_bobinas)
+    
+            self.combo_num_colunas_bobinas = QtWidgets.QComboBox()
+            self.combo_num_colunas_bobinas.addItems(opcoes_colunas)
+            self.combo_num_colunas_bobinas.setCurrentIndex(2)  # Padrão: 2 Colunas (conforme imagem oficial)
+            self.combo_num_colunas_bobinas.setStyleSheet(combo_style)
+            self.combo_num_colunas_bobinas.currentIndexChanged.connect(self.reorganizar_colunas_seletores_caracterizacao)
+            top_bar_tab5.addWidget(self.combo_num_colunas_bobinas)
+    
+            top_bar_tab5.addSpacing(15)
+    
+            # 2. Seletor para os Demais Seletores (Espaçadores, Cupons, Corrosão, Locais, Amostras)
+            lbl_cols_painel = QtWidgets.QLabel("Colunas dos Outros Seletores:")
+            lbl_cols_painel.setStyleSheet("color: #e1e1e6; font-size: 8.5pt; font-weight: bold;")
+            top_bar_tab5.addWidget(lbl_cols_painel)
+    
+            self.combo_num_colunas_painel = QtWidgets.QComboBox()
+            self.combo_num_colunas_painel.addItems(opcoes_colunas)
+            self.combo_num_colunas_painel.setCurrentIndex(0)  # Padrão: Auto (Dinâmico)
+            self.combo_num_colunas_painel.setStyleSheet(combo_style)
+            self.combo_num_colunas_painel.currentIndexChanged.connect(self.reorganizar_colunas_seletores_caracterizacao)
+            top_bar_tab5.addWidget(self.combo_num_colunas_painel)
+    
+            top_bar_tab5.addStretch()
+            tab_coil_outer_layout.addLayout(top_bar_tab5)
+    
+            # Splitter Horizontal para permitir ajustar a largura do menu lateral manualmente
+            self.splitter_tab_coil = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+            self.splitter_tab_coil.setStyleSheet("""
+                QSplitter::handle {
+                    background-color: #3a3a3c;
+                    width: 6px;
+                }
+                QSplitter::handle:hover {
+                    background-color: #00e676;
+                }
+            """)
+    
+            # Sub-painel Esquerdo: Especificações e Controles (Scroll Area)
+            coil_left = QtWidgets.QWidget()
+            coil_left.setMinimumWidth(240)
+            coil_left_layout = QtWidgets.QVBoxLayout(coil_left)
+            coil_left_layout.setContentsMargins(0, 0, 0, 0)
+    
+            self.scroll_coil = QtWidgets.QScrollArea()
+            self.scroll_coil.setWidgetResizable(True)
+            self.scroll_coil.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            self.scroll_coil.setStyleSheet("background-color: #1e1e1e; border: none;")
+            
+            scroll_coil_content = QtWidgets.QWidget()
+            scroll_coil_layout = QtWidgets.QVBoxLayout(scroll_coil_content)
+            scroll_coil_layout.setContentsMargins(8, 8, 8, 8)
+            scroll_coil_layout.setSpacing(12)
+    
+            # 1. Seleção e Cadastro de Bobinas / Sensores
+            group_coil_select = QtWidgets.QGroupBox("Seleção do Sensor / Bobina")
+            group_coil_select.setStyleSheet("""
+                QGroupBox {
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    margin-top: 12px;
+                    font-weight: bold;
+                    color: #29b6f6;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 3px;
+                }
+            """)
+            group_coil_select_layout = QtWidgets.QVBoxLayout(group_coil_select)
+            group_coil_select_layout.setSpacing(8)
+    
+            # Botão para abrir a caixa de diálogo de cadastro/edição
+            self.btn_open_coil_dialog = QtWidgets.QPushButton("⚙️ Cadastrar / Editar Sensores")
+            self.btn_open_coil_dialog.setMinimumHeight(35)
+            self.btn_open_coil_dialog.setStyleSheet("background-color: #29b6f6; color: #000000; font-weight: bold;")
+            self.btn_open_coil_dialog.clicked.connect(self.abrir_dialogo_cadastro_bobina)
+            group_coil_select_layout.addWidget(self.btn_open_coil_dialog)
+    
+            # Container para os Radio Buttons (Bullet Points) dos sensores
+            self.widget_radio_bobinas_container = QtWidgets.QWidget()
+            self.layout_radio_bobinas = QtWidgets.QGridLayout(self.widget_radio_bobinas_container)
+            self.layout_radio_bobinas.setContentsMargins(0, 0, 0, 0)
+            self.layout_radio_bobinas.setSpacing(4)
+            self.group_radio_bobinas = QtWidgets.QButtonGroup(self)
+            self.lista_widgets_radio_bobinas = []
+            
+            group_coil_select_layout.addWidget(self.widget_radio_bobinas_container)
+            scroll_coil_layout.addWidget(group_coil_select)
+    
+            # 2. Exibição das Características do Sensor Selecionado (Card Colapsável / Exibir-Esconder)
+            group_coil_card = CollapsibleGroupBox("Características do Sensor Selecionado", parent=self)
+            coil_card_layout = QtWidgets.QVBoxLayout()
+            self.txt_coil_specs_card = QtWidgets.QTextEdit()
+            self.txt_coil_specs_card.setReadOnly(True)
+            self.txt_coil_specs_card.setMinimumHeight(150)
+            self.txt_coil_specs_card.setStyleSheet("""
+                QTextEdit {
+                    background-color: #121214;
+                    color: #00ff00;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    font-size: 8.5pt;
+                    border: 1px solid #2a2a2e;
+                    border-radius: 4px;
+                    padding: 6px;
+                }
+            """)
+            coil_card_layout.addWidget(self.txt_coil_specs_card)
+            group_coil_card.setContentLayout(coil_card_layout)
+            scroll_coil_layout.addWidget(group_coil_card)
+    
+            # 3. Calculadora de Lift-Off (Espaçadores & Berço)
+            group_coil_env = QtWidgets.QGroupBox("Calculadora de Lift-Off (Espaçadores & Berço)")
+            group_coil_env.setStyleSheet("""
+                QGroupBox {
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    margin-top: 12px;
+                    font-weight: bold;
+                    color: #ab47bc;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 3px;
+                }
+                QCheckBox, QRadioButton {
+                    color: #ffffff !important;
+                    font-size: 8pt;
+                    font-weight: bold;
+                    spacing: 5px;
+                }
+                QCheckBox::indicator, QRadioButton::indicator {
+                    width: 14px;
+                    height: 14px;
+                    border: 1.5px solid #888888;
+                    background-color: #222225;
+                    border-radius: 3px;
+                }
+                QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+                    border: 1.5px solid #00e676;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #00e676;
+                    border: 1.5px solid #ffffff;
+                }
+                QRadioButton::indicator {
+                    border-radius: 7px;
+                }
+                QRadioButton::indicator:checked {
+                    background-color: #29b6f6;
+                    border: 2px solid #ffffff;
+                    border-radius: 7px;
+                }
+            """)
+            coil_env_layout = QtWidgets.QVBoxLayout(group_coil_env)
+            coil_env_layout.setSpacing(8)
+    
+            coil_env_form = QtWidgets.QFormLayout()
+            coil_env_form.setSpacing(6)
+    
+            def criar_linha_separadora():
+                line = QtWidgets.QFrame()
+                line.setFrameShape(QtWidgets.QFrame.HLine)
+                line.setFrameShadow(QtWidgets.QFrame.Sunken)
+                line.setStyleSheet("background-color: #3a3a3c; min-height: 1px; max-height: 1px; border: none; margin-top: 3px; margin-bottom: 3px;")
+                return line
+    
+            # Seleção da Base Berço (Checkboxes Exclusivos, Base P Padrão, 1 Coluna Fixa)
+            self.chk_berco_maior = QtWidgets.QCheckBox("Base G (74.6x104.6mm | H=2.6mm)")
+            self.chk_berco_menor = QtWidgets.QCheckBox("Base P (52.5x74.5mm | H=2.6mm)")
+            self.chk_berco_menor.setChecked(True)
+    
+            self.group_berco = QtWidgets.QButtonGroup(self)
+            self.group_berco.addButton(self.chk_berco_maior)
+            self.group_berco.addButton(self.chk_berco_menor)
+    
+            self.chk_berco_maior.toggled.connect(self.calcular_liftoff_bancada)
+            self.chk_berco_menor.toggled.connect(self.calcular_liftoff_bancada)
+    
+            self.layout_berco_grid = QtWidgets.QVBoxLayout()
+            self.layout_berco_grid.setSpacing(3)
+            self.layout_berco_grid.addWidget(self.chk_berco_maior)
+            self.layout_berco_grid.addWidget(self.chk_berco_menor)
+    
+            coil_env_form.addRow("Modelo do Berço:", self.layout_berco_grid)
+            coil_env_form.addRow(criar_linha_separadora())
+    
+            # Seleção de Espaçadores Empilhados via 4 Colunas (5mm, 4mm, 2mm, 1mm) e 2 Linhas (1x, 2x)
+            self.chk_espacador_5mm_1 = QtWidgets.QCheckBox("1x")
+            self.chk_espacador_5mm_2 = QtWidgets.QCheckBox("2x")
+            self.chk_espacador_4mm_1 = QtWidgets.QCheckBox("1x")
+            self.chk_espacador_4mm_2 = QtWidgets.QCheckBox("2x")
+            self.chk_espacador_2mm_1 = QtWidgets.QCheckBox("1x")
+            self.chk_espacador_2mm_2 = QtWidgets.QCheckBox("2x")
+            self.chk_espacador_1mm_1 = QtWidgets.QCheckBox("1x")
+            self.chk_espacador_1mm_2 = QtWidgets.QCheckBox("2x")
+    
+            # Aliases para compatibilidade legada
+            self.chk_espacador_5mm = self.chk_espacador_5mm_1
+            self.chk_espacador_4mm = self.chk_espacador_4mm_1
+            self.chk_espacador_2mm = self.chk_espacador_2mm_1
+            self.chk_espacador_1mm = self.chk_espacador_1mm_1
+    
+            # Conecta o comportamento mutuamente exclusivo (1x vs 2x) por espessura
+            self.chk_espacador_5mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_5mm_1, self.chk_espacador_5mm_2))
+            self.chk_espacador_5mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_5mm_2, self.chk_espacador_5mm_1))
+    
+            self.chk_espacador_4mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_4mm_1, self.chk_espacador_4mm_2))
+            self.chk_espacador_4mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_4mm_2, self.chk_espacador_4mm_1))
+    
+            self.chk_espacador_2mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_2mm_1, self.chk_espacador_2mm_2))
+            self.chk_espacador_2mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_2mm_2, self.chk_espacador_2mm_1))
+    
+            self.chk_espacador_1mm_1.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_1mm_1, self.chk_espacador_1mm_2))
+            self.chk_espacador_1mm_2.clicked.connect(lambda: self.ao_alternar_checkbox_espacador(self.chk_espacador_1mm_2, self.chk_espacador_1mm_1))
+    
+            self.widget_spacers_container = QtWidgets.QWidget()
+            layout_spacers_h = QtWidgets.QHBoxLayout(self.widget_spacers_container)
+            layout_spacers_h.setContentsMargins(0, 2, 0, 2)
+            layout_spacers_h.setSpacing(0)
+    
+            espacadores_cols = [
+                ("5mm", self.chk_espacador_5mm_1, self.chk_espacador_5mm_2),
+                ("4mm", self.chk_espacador_4mm_1, self.chk_espacador_4mm_2),
+                ("2mm", self.chk_espacador_2mm_1, self.chk_espacador_2mm_2),
+                ("1mm", self.chk_espacador_1mm_1, self.chk_espacador_1mm_2),
+            ]
+    
+            for idx_col, (label_txt, chk_1, chk_2) in enumerate(espacadores_cols):
+                col_widget = QtWidgets.QWidget()
+                col_layout = QtWidgets.QVBoxLayout(col_widget)
+                col_layout.setContentsMargins(8, 2, 8, 2)
+                col_layout.setSpacing(4)
+    
+                lbl_title = QtWidgets.QLabel(label_txt)
+                lbl_title.setAlignment(QtCore.Qt.AlignCenter)
+                lbl_title.setStyleSheet("font-weight: bold; color: #00e676; font-size: 9pt;")
+                col_layout.addWidget(lbl_title)
+                col_layout.addWidget(chk_1)
+                col_layout.addWidget(chk_2)
+    
+                layout_spacers_h.addWidget(col_widget)
+    
+                if idx_col < len(espacadores_cols) - 1:
+                    sep_v = QtWidgets.QFrame()
+                    sep_v.setFrameShape(QtWidgets.QFrame.VLine)
+                    sep_v.setFrameShadow(QtWidgets.QFrame.Sunken)
+                    sep_v.setStyleSheet("background-color: rgba(255, 255, 255, 0.15); width: 1px;")
+                    layout_spacers_h.addWidget(sep_v)
+    
+            coil_env_form.addRow("Espaçadores:", self.widget_spacers_container)
+            coil_env_form.addRow(criar_linha_separadora())
+    
+            # Distância Resultante (Calculada e Editável com Trava de Scroll e Confirmação ao Concluir Edição)
+            self.spin_liftoff_dist = QtWidgets.QDoubleSpinBox()
+            self.spin_liftoff_dist.setRange(0.0, 100.0)
+            self.spin_liftoff_dist.setSingleStep(0.5)
+            self.spin_liftoff_dist.setSuffix(" mm")
+            self.spin_liftoff_dist.setValue(0.0)
+            self.spin_liftoff_dist.wheelEvent = lambda event: event.ignore()
+            self.spin_liftoff_dist.editingFinished.connect(self.ao_concluir_edicao_spin_liftoff)
+            coil_env_form.addRow("Distância Lift-Off (d):", self.spin_liftoff_dist)
+    
+            coil_env_layout.addLayout(coil_env_form)
+    
+            # Label com equação do cálculo automático de Lift-Off
+            self.lbl_calculo_liftoff_info = QtWidgets.QLabel("Fórmula: d = (Espaçadores + 2.6 mm) - H_bobina")
+            self.lbl_calculo_liftoff_info.setStyleSheet("color: #f1c40f; font-size: 8.5pt; font-family: monospace;")
+            coil_env_layout.addWidget(self.lbl_calculo_liftoff_info)
+    
+            scroll_coil_layout.addWidget(group_coil_env)
+    
+            # 4. Seleção do Cupom / Amostra
+            group_coil_coupon = QtWidgets.QGroupBox("Seleção do Cupom / Amostra")
+            group_coil_coupon.setStyleSheet("""
+                QGroupBox {
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    margin-top: 12px;
+                    font-weight: bold;
+                    color: #26a69a;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 3px;
+                }
+                QCheckBox, QRadioButton {
+                    color: #ffffff !important;
+                    font-size: 8pt;
+                    font-weight: bold;
+                    spacing: 5px;
+                }
+                QCheckBox::indicator, QRadioButton::indicator {
+                    width: 14px;
+                    height: 14px;
+                    border: 1.5px solid #888888;
+                    background-color: #222225;
+                    border-radius: 3px;
+                }
+                QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+                    border: 1.5px solid #00e676;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #00e676;
+                    border: 1.5px solid #ffffff;
+                }
+            """)
+            coil_coupon_layout = QtWidgets.QVBoxLayout(group_coil_coupon)
+            coil_coupon_layout.setSpacing(8)
+    
+            coil_coupon_form = QtWidgets.QFormLayout()
+            coil_coupon_form.setSpacing(6)
+    
+            # 1º Item: ID da Amostra (Limitado a no máximo 3 caracteres conforme o novo padrão)
+            self.edit_coil_sample_id = QtWidgets.QLineEdit("1")
+            self.edit_coil_sample_id.setMaxLength(3)
+            self.edit_coil_sample_id.setToolTip("O ID da Amostra é limitado a no máximo 3 caracteres (ex: 001, 012, 100)")
+            self.edit_coil_sample_id.textChanged.connect(self.ao_validar_limite_id_amostra)
+            coil_coupon_form.addRow("ID da Amostra (Max 3):", self.edit_coil_sample_id)
+            coil_coupon_form.addRow(criar_linha_separadora())
+    
+            # 2º Item: Cupom / Material por Checkboxes (Exclusivos)
+            self.chk_materiais = {}
+            self.group_materiais = QtWidgets.QButtonGroup(self)
+            self.widget_mat_container = QtWidgets.QWidget()
+            self.layout_mat_grid = QtWidgets.QGridLayout(self.widget_mat_container)
+            self.layout_mat_grid.setContentsMargins(0, 0, 0, 0)
+            self.layout_mat_grid.setSpacing(3)
+            self.lista_widgets_materiais = []
+    
+            materiais_lista = self.carregar_lista_materiais()
+            for idx_m, mat_nome in enumerate(materiais_lista):
+                chk = QtWidgets.QCheckBox(mat_nome)
+                self.chk_materiais[mat_nome] = chk
+                self.group_materiais.addButton(chk)
+                self.lista_widgets_materiais.append(chk)
+                if idx_m == 0:
+                    chk.setChecked(True)
+                self.layout_mat_grid.addWidget(chk, idx_m // 3, idx_m % 3)
+    
+            coil_coupon_form.addRow("Cupom / Material:", self.widget_mat_container)
+            self.group_materiais.buttonClicked.connect(self.ao_alterar_material_caracterizacao)
+            coil_coupon_form.addRow(criar_linha_separadora())
+    
+            # 3º Item: Seleção de Estado de Corrosão por Checkboxes (Exclusivos)
+            self.chk_classes = {}
+            self.group_classes = QtWidgets.QButtonGroup(self)
+            self.widget_cls_container = QtWidgets.QWidget()
+            self.layout_cls_grid = QtWidgets.QGridLayout(self.widget_cls_container)
+            self.layout_cls_grid.setContentsMargins(0, 0, 0, 0)
+            self.layout_cls_grid.setSpacing(3)
+            self.lista_widgets_classes = []
+    
+            classes_lista = ["Ar Livre", "Saudável", "Leve", "Moderada", "Avançada", "Corroído"]
+            for idx_c, cls_nome in enumerate(classes_lista):
+                chk = QtWidgets.QCheckBox(cls_nome)
+                self.chk_classes[cls_nome] = chk
+                self.group_classes.addButton(chk)
+                self.lista_widgets_classes.append(chk)
+                if cls_nome == "Saudável":
+                    chk.setChecked(True)
+                self.layout_cls_grid.addWidget(chk, idx_c // 3, idx_c % 3)
+    
+            coil_coupon_form.addRow("Estado de Corrosão:", self.widget_cls_container)
+            self.group_classes.buttonClicked.connect(self.ao_alterar_classe_caracterizacao)
+            coil_coupon_form.addRow(criar_linha_separadora())
+    
+            # 4º Item: Checkboxes para Seleção do Local da Amostra
+            self.chk_locais = {}
+            locais_opcoes = ["São Paulo", "Ceara", "Venancio", "Caxias", "Rosario", "Senai", "Branco"]
+            self.widget_locais_container = QtWidgets.QWidget()
+            self.layout_locais_grid = QtWidgets.QGridLayout(self.widget_locais_container)
+            self.layout_locais_grid.setContentsMargins(0, 0, 0, 0)
+            self.layout_locais_grid.setSpacing(3)
+            self.lista_widgets_locais = []
+            for idx_l, nome_l in enumerate(locais_opcoes):
+                chk = QtWidgets.QCheckBox(nome_l)
+                self.chk_locais[nome_l] = chk
+                self.lista_widgets_locais.append(chk)
+                self.layout_locais_grid.addWidget(chk, idx_l // 3, idx_l % 3)
+    
+            coil_coupon_form.addRow("Local da Amostra:", self.widget_locais_container)
+            coil_coupon_layout.addLayout(coil_coupon_form)
+    
+            scroll_coil_layout.addWidget(group_coil_coupon)
+    
+            # 5. Botões de Gravação e Gerenciamento
+            group_coil_actions = QtWidgets.QGroupBox("Ações & Gravação de Testes")
+            group_coil_actions.setStyleSheet("""
+                QGroupBox {
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    margin-top: 12px;
+                    font-weight: bold;
+                    color: #e1e1e6;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 3px;
+                }
+                QCheckBox, QRadioButton {
+                    color: #ffffff !important;
+                    font-size: 8pt;
+                    font-weight: bold;
+                    spacing: 5px;
+                }
+                QCheckBox::indicator, QRadioButton::indicator {
+                    width: 14px;
+                    height: 14px;
+                    border: 1.5px solid #888888;
+                    background-color: #222225;
+                    border-radius: 3px;
+                }
+                QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+                    border: 1.5px solid #00e676;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #00e676;
+                    border: 1.5px solid #ffffff;
+                }
+            """)
+            coil_actions_layout = QtWidgets.QVBoxLayout(group_coil_actions)
+            coil_actions_layout.setSpacing(8)
+    
+            lbl_num_amostras = QtWidgets.QLabel("Qtd Amostras / Arquivo:")
+            lbl_num_amostras.setStyleSheet("color: #e1e1e6; font-weight: bold; font-size: 8.5pt;")
+            coil_actions_layout.addWidget(lbl_num_amostras)
+    
+            self.chk_num_amostras = {}
+            self.group_num_amostras = QtWidgets.QButtonGroup(self)
+            self.widget_num_amostras_container = QtWidgets.QWidget()
+            self.layout_num_amostras_grid = QtWidgets.QGridLayout(self.widget_num_amostras_container)
+            self.layout_num_amostras_grid.setContentsMargins(0, 0, 0, 0)
+            self.layout_num_amostras_grid.setSpacing(4)
+            self.lista_widgets_num_amostras = []
+    
+            opcoes_amostras = [
+                ("1 Amostra", 1),
+                ("10 Amostras", 10),
+                ("100 Amostras", 100),
+                ("1000 Amostras", 1000)
+            ]
+    
+            for idx_a, (label_a, val_a) in enumerate(opcoes_amostras):
+                chk = QtWidgets.QCheckBox(label_a)
+                chk.setProperty("val_n", val_a)
+                self.chk_num_amostras[val_a] = chk
+                self.group_num_amostras.addButton(chk)
+                self.lista_widgets_num_amostras.append(chk)
+                if val_a == 1:
+                    chk.setChecked(True)
+                self.layout_num_amostras_grid.addWidget(chk, idx_a // 3, idx_a % 3)
+    
+            coil_actions_layout.addWidget(self.widget_num_amostras_container)
+    
+            self.btn_record_coil_test = QtWidgets.QPushButton("Gravar Ensaio de Caracterização")
+            self.btn_record_coil_test.setMinimumHeight(45)
+            self.btn_record_coil_test.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; font-size: 10pt;")
+            self.btn_record_coil_test.clicked.connect(self.gravar_ensaio_caracterizacao)
+            coil_actions_layout.addWidget(self.btn_record_coil_test)
+    
+            self.btn_import_coil_csvs = QtWidgets.QPushButton("Importar Testes CSV")
+            self.btn_import_coil_csvs.setMinimumHeight(38)
+            self.btn_import_coil_csvs.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold; font-size: 10pt;")
+            self.btn_import_coil_csvs.clicked.connect(self.importar_csvs_caracterizacao)
+            coil_actions_layout.addWidget(self.btn_import_coil_csvs)
+    
+            self.btn_clear_coil_comparison = QtWidgets.QPushButton("Limpar Seleção / Gráficos")
+            self.btn_clear_coil_comparison.setMinimumHeight(35)
+            self.btn_clear_coil_comparison.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
+            self.btn_clear_coil_comparison.clicked.connect(self.limpar_comparacao_bobinas)
+            coil_actions_layout.addWidget(self.btn_clear_coil_comparison)
+    
+            self.btn_plot_3d_coils = QtWidgets.QPushButton("📊 Visualizar Gráfico 3D (L x AUC x Distância)")
+            self.btn_plot_3d_coils.setMinimumHeight(40)
+            self.btn_plot_3d_coils.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; font-size: 10pt;")
+            self.btn_plot_3d_coils.clicked.connect(self.abrir_grafico_3d_caracterizacao)
+            coil_actions_layout.addWidget(self.btn_plot_3d_coils)
+    
+            self.btn_export_coil_report = QtWidgets.QPushButton("Exportar Comparativo (PNG/HTML)")
+            self.btn_export_coil_report.setMinimumHeight(35)
+            self.btn_export_coil_report.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+            self.btn_export_coil_report.clicked.connect(self.exportar_relatorio_bobinas)
+            coil_actions_layout.addWidget(self.btn_export_coil_report)
+    
+            scroll_coil_layout.addWidget(group_coil_actions)
+    
+            # 4. Lista de Arquivos de Teste Ativos
+            group_coil_files = QtWidgets.QGroupBox("Arquivos de Teste Importados")
+            group_coil_files.setStyleSheet("""
+                QGroupBox {
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    margin-top: 12px;
+                    font-weight: bold;
+                    color: #00e676;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 3px;
+                }
+            """)
+            coil_files_layout = QtWidgets.QVBoxLayout(group_coil_files)
+            self.list_imported_coil_files = QtWidgets.QListWidget()
+            self.list_imported_coil_files.setStyleSheet("background-color: #121214; color: #e1e1e6; font-size: 9pt;")
+            self.list_imported_coil_files.itemSelectionChanged.connect(self.atualizar_graficos_comparacao_bobinas)
+            coil_files_layout.addWidget(self.list_imported_coil_files)
+    
+            scroll_coil_layout.addWidget(group_coil_files)
 
-        self.txt_coil_report = QtWidgets.QTextEdit()
-        self.txt_coil_report.setReadOnly(True)
-        self.txt_coil_report.setMaximumHeight(160)
-        self.txt_coil_report.setStyleSheet("""
-            QTextEdit {
-                background-color: #0c0c0d; color: #00ff00;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 9.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 6px;
-            }
-        """)
-        subtab_comp_layout.addWidget(self.txt_coil_report, 1)
-        self.tab_sub_caracterizacao.addTab(subtab_comparativo, "📈 Comparativos de Lift-Off")
+            # 5. Painel de Filtros de Exibição dos Gráficos
+            group_coil_filters = QtWidgets.QGroupBox("Filtros de Exibição dos Gráficos")
+            group_coil_filters_layout = QtWidgets.QGridLayout(group_coil_filters)
+            group_coil_filters.setStyleSheet("""
+                QGroupBox {
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    margin-top: 12px;
+                    font-weight: bold;
+                    color: #00e676;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 3px;
+                }
+            """)
 
-        # =====================================================================
-        # SUB-ABA 2: Monitoramento em Tempo Real & Diagnóstico do Sensor
-        # =====================================================================
-        subtab_realtime = QtWidgets.QWidget()
-        subtab_rt_layout = QtWidgets.QVBoxLayout(subtab_realtime)
-        subtab_rt_layout.setContentsMargins(2, 2, 2, 2)
-        subtab_rt_layout.setSpacing(4)
+            lbl_f_mats = QtWidgets.QLabel("<b>Materiais:</b>")
+            lbl_f_cls = QtWidgets.QLabel("<b>Classes:</b>")
+            group_coil_filters_layout.addWidget(lbl_f_mats, 0, 0)
+            group_coil_filters_layout.addWidget(lbl_f_cls, 0, 1)
 
-        self.win_coil_rt_plots = pg.GraphicsLayoutWidget()
-        self.win_coil_rt_plots.setBackground('#121214')
+            self.coil_filter_checkboxes_material = {}
+            materiais_lista = self.carregar_lista_materiais()
+            for idx_fm, mat_n in enumerate(materiais_lista):
+                chk_m = QtWidgets.QCheckBox(mat_n)
+                chk_m.setChecked(True)
+                chk_m.setStyleSheet("font-size: 8.5pt; color: #e1e1e6;")
+                chk_m.stateChanged.connect(self.atualizar_todos_graficos_caracterizacao)
+                self.coil_filter_checkboxes_material[mat_n] = chk_m
+                group_coil_filters_layout.addWidget(chk_m, idx_fm + 1, 0)
 
-        self.plot_coil_rt_live = self.win_coil_rt_plots.addPlot(row=0, col=0, title="Sinal Transiente em Tempo Real V(t) [Osciloscópio Live]")
-        self.plot_coil_rt_live.setLabel('left', 'ADC Counts')
-        self.plot_coil_rt_live.setLabel('bottom', 'Tempo (us)')
-        self.plot_coil_rt_live.showGrid(x=True, y=True, alpha=0.3)
+            self.chk_coil_filter_saudavel = QtWidgets.QCheckBox("Saudável")
+            self.chk_coil_filter_saudavel.setChecked(True)
+            self.chk_coil_filter_leve = QtWidgets.QCheckBox("Leve")
+            self.chk_coil_filter_leve.setChecked(True)
+            self.chk_coil_filter_moderada = QtWidgets.QCheckBox("Moderada")
+            self.chk_coil_filter_moderada.setChecked(True)
+            self.chk_coil_filter_avancada = QtWidgets.QCheckBox("Avançada")
+            self.chk_coil_filter_avancada.setChecked(True)
+            self.chk_coil_filter_corroido = QtWidgets.QCheckBox("Corroído")
+            self.chk_coil_filter_corroido.setChecked(True)
+            self.chk_coil_filter_ar_cls = QtWidgets.QCheckBox("Ar Livre")
+            self.chk_coil_filter_ar_cls.setChecked(True)
 
-        self.plot_coil_rt_overlay = self.win_coil_rt_plots.addPlot(row=0, col=1, title="Sobreposição Live vs Curva de Referência do Sensor")
-        self.plot_coil_rt_overlay.setLabel('left', 'ADC Counts')
-        self.plot_coil_rt_overlay.setLabel('bottom', 'Tempo (us)')
-        self.plot_coil_rt_overlay.showGrid(x=True, y=True, alpha=0.3)
+            cls_chks = [
+                self.chk_coil_filter_saudavel, self.chk_coil_filter_leve,
+                self.chk_coil_filter_moderada, self.chk_coil_filter_avancada,
+                self.chk_coil_filter_corroido, self.chk_coil_filter_ar_cls
+            ]
+            for idx_fc, chk_c in enumerate(cls_chks):
+                chk_c.setStyleSheet("font-size: 8.5pt; color: #e1e1e6;")
+                chk_c.stateChanged.connect(self.atualizar_todos_graficos_caracterizacao)
+                group_coil_filters_layout.addWidget(chk_c, idx_fc + 1, 1)
 
-        self.plot_coil_rt_residual = self.win_coil_rt_plots.addPlot(row=1, col=0, colSpan=2, title="Sinal Residual Delta V(t) [Medido - Referência]")
-        self.plot_coil_rt_residual.setLabel('left', 'Delta ADC Counts')
-        self.plot_coil_rt_residual.setLabel('bottom', 'Tempo (us)')
-        self.plot_coil_rt_residual.showGrid(x=True, y=True, alpha=0.3)
+            max_rows_f = max(len(materiais_lista), len(cls_chks)) + 1
+            self.chk_coil_filter_outliers = QtWidgets.QCheckBox("Remover Outliers (IQR)")
+            self.chk_coil_filter_outliers.setChecked(False)
+            self.chk_coil_filter_outliers.stateChanged.connect(self.atualizar_todos_graficos_caracterizacao)
+            group_coil_filters_layout.addWidget(self.chk_coil_filter_outliers, max_rows_f, 0, 1, 2)
 
-        subtab_rt_layout.addWidget(self.win_coil_rt_plots, 2)
+            self.chk_diferenciar_ids_tonalidade = QtWidgets.QCheckBox("Diferenciar Tonalidades por ID")
+            self.chk_diferenciar_ids_tonalidade.setToolTip("Altera a tonalidade (luminosidade HSL) dos pontos para diferenciar IDs de amostras distintos")
+            self.chk_diferenciar_ids_tonalidade.setChecked(False)
+            self.chk_diferenciar_ids_tonalidade.stateChanged.connect(self.atualizar_todos_graficos_caracterizacao)
+            group_coil_filters_layout.addWidget(self.chk_diferenciar_ids_tonalidade, max_rows_f + 1, 0, 1, 2)
 
-        self.txt_coil_rt_report = QtWidgets.QTextEdit()
-        self.txt_coil_rt_report.setReadOnly(True)
-        self.txt_coil_rt_report.setMaximumHeight(160)
-        self.txt_coil_rt_report.setStyleSheet("""
-            QTextEdit {
-                background-color: #0c0c0d; color: #29b6f6;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 9.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 6px;
-            }
-        """)
-        subtab_rt_layout.addWidget(self.txt_coil_rt_report, 1)
-        self.tab_sub_caracterizacao.addTab(subtab_realtime, "⚡ Monitoramento em Tempo Real")
+            self.chk_coil_enable_tooltips = QtWidgets.QCheckBox("👁️ Exibir Tooltips e Destaques Visuais")
+            self.chk_coil_enable_tooltips.setToolTip("Habilita ou desabilita a exibição de destaques visuais e balões de tooltip flutuantes nos gráficos")
+            self.chk_coil_enable_tooltips.setChecked(True)
+            self.chk_coil_enable_tooltips.stateChanged.connect(self.ao_alternar_exibicao_tooltips)
+            group_coil_filters_layout.addWidget(self.chk_coil_enable_tooltips, max_rows_f + 2, 0, 1, 2)
 
-        # =====================================================================
-        # SUB-ABA 3: Análise Estatística de Caracterização
-        # =====================================================================
-        subtab_stats = QtWidgets.QWidget()
-        subtab_st_layout = QtWidgets.QVBoxLayout(subtab_stats)
-        subtab_st_layout.setContentsMargins(2, 2, 2, 2)
-        subtab_st_layout.setSpacing(4)
+            scroll_coil_layout.addWidget(group_coil_filters)
 
-        self.win_coil_st_plots = pg.GraphicsLayoutWidget()
-        self.win_coil_st_plots.setBackground('#121214')
-        self.win_coil_st_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_grafico_estatistico_caracterizacao)
+            # 6. Painel de Legenda / Índice dos Gráficos
+            group_coil_legend = QtWidgets.QGroupBox("Legenda dos Gráficos (Índice)")
+            group_coil_legend_layout = QtWidgets.QGridLayout(group_coil_legend)
+            group_coil_legend.setStyleSheet("""
+                QGroupBox {
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    margin-top: 12px;
+                    font-weight: bold;
+                    color: #e1e1e6;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 3px;
+                }
+                QLabel { font-size: 8.5pt; }
+            """)
 
-        self.plot_coil_st_decay = self.win_coil_st_plots.addPlot(row=0, col=0, title="Sinais Médios de Decaimento (Média ± DP)")
-        self.plot_coil_st_decay.setLabel('left', 'Tensão / ADC Counts')
-        self.plot_coil_st_decay.setLabel('bottom', 'Tempo (us)')
-        self.plot_coil_st_decay.showGrid(x=True, y=True, alpha=0.3)
+            lbl_f_hdr = QtWidgets.QLabel("<b>Formas (Materiais):</b>")
+            group_coil_legend_layout.addWidget(lbl_f_hdr, 0, 0, 1, 2)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("<span style='font-size: 11pt;'>⚪</span> A36 Comum (Círculo)"), 1, 0)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("<span style='font-size: 11pt;'>⏹️</span> A36 GE - Galv. Eletrolítico (Quadrado)"), 1, 1)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("<span style='font-size: 11pt;'>🔶</span> A36 GF - Galv. a Fogo (Losango)"), 2, 0)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("<span style='font-size: 11pt;'>🔺</span> Estrutura Torre (Triângulo)"), 2, 1)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("<span style='font-size: 11pt;'>➕</span> Ar Livre (Cruz)"), 3, 0)
 
-        self.plot_coil_st_tau = self.win_coil_st_plots.addPlot(row=0, col=1, title="Distribuição da Constante de Tempo (Tau)")
-        self.plot_coil_st_tau.setLabel('left', 'Tau (us)')
-        self.plot_coil_st_tau.setLabel('bottom', 'Lift-Off (mm)')
-        self.plot_coil_st_tau.showGrid(x=True, y=True, alpha=0.3)
+            lbl_c_hdr = QtWidgets.QLabel("<b>Cores (Degradação):</b>")
+            group_coil_legend_layout.addWidget(lbl_c_hdr, 4, 0, 1, 2)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("🔵 Saudável"), 5, 0)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("🟢 Leve"), 5, 1)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("🟡 Moderada"), 6, 0)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("🟠 Avançada"), 6, 1)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("🔴 Corroído"), 7, 0)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("🟣 Ar Livre"), 7, 1)
 
-        self.plot_coil_st_auc = self.win_coil_st_plots.addPlot(row=1, col=0, title="Distribuição da Área sob a Curva (AUC)")
-        self.plot_coil_st_auc.setLabel('left', 'AUC (Counts.us)')
-        self.plot_coil_st_auc.setLabel('bottom', 'Lift-Off (mm)')
-        self.plot_coil_st_auc.showGrid(x=True, y=True, alpha=0.3)
+            scroll_coil_layout.addWidget(group_coil_legend)
 
-        self.plot_coil_st_scatter = self.win_coil_st_plots.addPlot(row=1, col=1, title="Espaço de Características: AUC vs Tau")
-        self.plot_coil_st_scatter.setLabel('left', 'AUC (Counts.us)')
-        self.plot_coil_st_scatter.setLabel('bottom', 'Tau (us)')
-        self.plot_coil_st_scatter.showGrid(x=True, y=True, alpha=0.3)
+            self.scroll_coil.setWidget(scroll_coil_content)
+            coil_left_layout.addWidget(self.scroll_coil)
+    
+            # Sub-painel Direito: Container de Sub-Abas da Caracterização (Comparativos, Tempo Real, Estatística)
+            coil_right = QtWidgets.QWidget()
+            coil_right_layout = QtWidgets.QVBoxLayout(coil_right)
+            coil_right_layout.setContentsMargins(0, 0, 0, 0)
+            coil_right_layout.setSpacing(4)
+    
+            self.tab_sub_caracterizacao = QtWidgets.QTabWidget()
+            self.tab_sub_caracterizacao.setStyleSheet("""
+                QTabWidget::pane {
+                    border: 1px solid #3a3a3c;
+                    background-color: #121214;
+                    border-radius: 4px;
+                }
+                QTabBar::tab {
+                    background-color: #1e1e1f;
+                    color: #a0a0a0;
+                    padding: 6px 14px;
+                    margin-right: 2px;
+                    border-top-left-radius: 4px;
+                    border-top-right-radius: 4px;
+                    font-weight: bold;
+                    font-size: 9pt;
+                }
+                QTabBar::tab:selected {
+                    background-color: #2c2c2e;
+                    color: #00e676;
+                    border-bottom: 2px solid #00e676;
+                }
+                QTabBar::tab:hover:!selected {
+                    background-color: #2a2a2c;
+                    color: #ffffff;
+                }
+            """)
+    
+            # =====================================================================
+            # SUB-ABA 1: Comparativos de Lift-Off & Bobinas (Visualização Atual)
+            # =====================================================================
+            subtab_comparativo = QtWidgets.QWidget()
+            subtab_comp_layout = QtWidgets.QVBoxLayout(subtab_comparativo)
+            subtab_comp_layout.setContentsMargins(2, 2, 2, 2)
+            subtab_comp_layout.setSpacing(4)
+    
+            self.win_coil_plots = pg.GraphicsLayoutWidget()
+            self.win_coil_plots.setBackground('#121214')
+            self.win_coil_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_grafico_caracterizacao)
+            self.win_coil_plots.scene().sigMouseClicked.connect(self.ao_clicar_mouse_grafico)
+    
+            subtab_comp_layout.addWidget(self.criar_barrafullscreen_container(self.win_coil_plots, "Sub-Aba 1: Comparativos de Lift-Off"))
+            subtab_comp_layout.addWidget(self.win_coil_plots, 2)
 
-        subtab_st_layout.addWidget(self.win_coil_st_plots, 2)
+            self.plot_coil_decay = self.win_coil_plots.addPlot(row=0, col=0, title="Decaimento Transiente Comparativo V(t)")
+            self.plot_coil_decay.setLabel('left', 'Tensão / ADC Counts')
+            self.plot_coil_decay.setLabel('bottom', 'Tempo (us)')
+            self.plot_coil_decay.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.plot_coil_tau_liftoff = self.win_coil_plots.addPlot(row=0, col=1, title="Constante de Tempo (Tau) vs Distância (Lift-Off)")
+            self.plot_coil_tau_liftoff.setLabel('left', 'Tau (us)')
+            self.plot_coil_tau_liftoff.setLabel('bottom', 'Distância (mm)')
+            self.plot_coil_tau_liftoff.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.plot_coil_auc_liftoff = self.win_coil_plots.addPlot(row=1, col=0, title="Área Sob a Curva (AUC) vs Distância (Lift-Off)")
+            self.plot_coil_auc_liftoff.setLabel('left', 'AUC (Counts.us)')
+            self.plot_coil_auc_liftoff.setLabel('bottom', 'Distância (mm)')
+            self.plot_coil_auc_liftoff.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.plot_coil_l_liftoff = self.win_coil_plots.addPlot(row=1, col=1, title="Indutância Efetiva L vs Distância (Lift-Off)")
+            self.plot_coil_l_liftoff.setLabel('left', 'Indutância L (uH)')
+            self.plot_coil_l_liftoff.setLabel('bottom', 'Distância (mm)')
+            self.plot_coil_l_liftoff.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.txt_coil_report = QtWidgets.QTextEdit()
+            self.txt_coil_report.setReadOnly(True)
+            self.txt_coil_report.setMaximumHeight(160)
+            self.txt_coil_report.setStyleSheet("""
+                QTextEdit {
+                    background-color: #0c0c0d; color: #00ff00;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    font-size: 9.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 6px;
+                }
+            """)
+            subtab_comp_layout.addWidget(self.txt_coil_report, 1)
+            self.tab_sub_caracterizacao.addTab(subtab_comparativo, "📈 Comparativos de Lift-Off")
+    
+            # =====================================================================
+            # SUB-ABA 2: Monitoramento em Tempo Real & Diagnóstico do Sensor
+            # =====================================================================
+            subtab_realtime = QtWidgets.QWidget()
+            subtab_rt_layout = QtWidgets.QVBoxLayout(subtab_realtime)
+            subtab_rt_layout.setContentsMargins(2, 2, 2, 2)
+            subtab_rt_layout.setSpacing(4)
+    
+            self.win_coil_rt_plots = pg.GraphicsLayoutWidget()
+            self.win_coil_rt_plots.setBackground('#121214')
+            self.win_coil_rt_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_grafico_rt_caracterizacao)
+            self.win_coil_rt_plots.scene().sigMouseClicked.connect(self.ao_clicar_mouse_grafico)
+            subtab_rt_layout.addWidget(self.criar_barrafullscreen_container(self.win_coil_rt_plots, "Sub-Aba 2: Monitoramento em Tempo Real do Sensor"))
+            subtab_rt_layout.addWidget(self.win_coil_rt_plots, 2)
+    
+            self.plot_coil_rt_live = self.win_coil_rt_plots.addPlot(row=0, col=0, title="Sinal Transiente em Tempo Real V(t) [Osciloscópio Live]")
+            self.plot_coil_rt_live.setLabel('left', 'ADC Counts')
+            self.plot_coil_rt_live.setLabel('bottom', 'Tempo (us)')
+            self.plot_coil_rt_live.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.plot_coil_rt_overlay = self.win_coil_rt_plots.addPlot(row=0, col=1, title="Sobreposição Live vs Curva de Referência do Sensor")
+            self.plot_coil_rt_overlay.setLabel('left', 'ADC Counts')
+            self.plot_coil_rt_overlay.setLabel('bottom', 'Tempo (us)')
+            self.plot_coil_rt_overlay.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.plot_coil_rt_residual = self.win_coil_rt_plots.addPlot(row=1, col=0, colSpan=2, title="Sinal Residual Delta V(t) [Medido - Referência]")
+            self.plot_coil_rt_residual.setLabel('left', 'Delta ADC Counts')
+            self.plot_coil_rt_residual.setLabel('bottom', 'Tempo (us)')
+            self.plot_coil_rt_residual.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.txt_coil_rt_report = QtWidgets.QTextEdit()
+            self.txt_coil_rt_report.setReadOnly(True)
+            self.txt_coil_rt_report.setMaximumHeight(160)
+            self.txt_coil_rt_report.setStyleSheet("""
+                QTextEdit {
+                    background-color: #0c0c0d; color: #29b6f6;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    font-size: 9.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 6px;
+                }
+            """)
+            subtab_rt_layout.addWidget(self.txt_coil_rt_report, 1)
+            self.tab_sub_caracterizacao.addTab(subtab_realtime, "⚡ Monitoramento em Tempo Real")
+    
+            # =====================================================================
+            # SUB-ABA 3: Análise Estatística de Caracterização
+            # =====================================================================
+            subtab_stats = QtWidgets.QWidget()
+            subtab_st_layout = QtWidgets.QVBoxLayout(subtab_stats)
+            subtab_st_layout.setContentsMargins(2, 2, 2, 2)
+            subtab_st_layout.setSpacing(4)
+    
+            self.win_coil_st_plots = pg.GraphicsLayoutWidget()
+            self.win_coil_st_plots.setBackground('#121214')
+            self.win_coil_st_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_grafico_estatistico_caracterizacao)
+            self.win_coil_st_plots.scene().sigMouseClicked.connect(self.ao_clicar_mouse_grafico)
+            subtab_st_layout.addWidget(self.criar_barrafullscreen_container(self.win_coil_st_plots, "Sub-Aba 3: Análise Estatística de Caracterização"))
+            subtab_st_layout.addWidget(self.win_coil_st_plots, 2)
+    
+            self.plot_coil_st_decay = self.win_coil_st_plots.addPlot(row=0, col=0, title="Sinais Médios de Decaimento (Média ± DP)")
+            self.plot_coil_st_decay.setLabel('left', 'Tensão / ADC Counts')
+            self.plot_coil_st_decay.setLabel('bottom', 'Tempo (us)')
+            self.plot_coil_st_decay.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.plot_coil_st_tau = self.win_coil_st_plots.addPlot(row=0, col=1, title="Distribuição da Constante de Tempo (Tau)")
+            self.plot_coil_st_tau.setLabel('left', 'Tau (us)')
+            self.plot_coil_st_tau.setLabel('bottom', 'Lift-Off (mm)')
+            self.plot_coil_st_tau.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.plot_coil_st_auc = self.win_coil_st_plots.addPlot(row=1, col=0, title="Distribuição da Área sob a Curva (AUC)")
+            self.plot_coil_st_auc.setLabel('left', 'AUC (Counts.us)')
+            self.plot_coil_st_auc.setLabel('bottom', 'Lift-Off (mm)')
+            self.plot_coil_st_auc.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.plot_coil_st_scatter = self.win_coil_st_plots.addPlot(row=1, col=1, title="Espaço de Características: AUC vs Tau")
+            self.plot_coil_st_scatter.setLabel('left', 'AUC (Counts.us)')
+            self.plot_coil_st_scatter.setLabel('bottom', 'Tau (us)')
+            self.plot_coil_st_scatter.showGrid(x=True, y=True, alpha=0.3)
+    
+            self.txt_coil_st_report = QtWidgets.QTextEdit()
+            self.txt_coil_st_report.setReadOnly(True)
+            self.txt_coil_st_report.setMaximumHeight(160)
+            self.txt_coil_st_report.setStyleSheet("""
+                QTextEdit {
+                    background-color: #0c0c0d; color: #f1c40f;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    font-size: 9.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 6px;
+                }
+            """)
+            subtab_st_layout.addWidget(self.txt_coil_st_report, 1)
+            self.tab_sub_caracterizacao.addTab(subtab_stats, "📊 Análise Estatística de Caracterização")
+    
+            coil_right_layout.addWidget(self.tab_sub_caracterizacao)
+            self.tab_sub_caracterizacao.currentChanged.connect(self.ao_mudar_subaba_caracterizacao)
+    
+            self.splitter_tab_coil.addWidget(coil_left)
+            self.splitter_tab_coil.addWidget(coil_right)
+            self.splitter_tab_coil.setSizes([380, 1000])
+            self.splitter_tab_coil.splitterMoved.connect(self.reorganizar_colunas_seletores_caracterizacao)
+    
+            tab_coil_outer_layout.addWidget(self.splitter_tab_coil)
 
-        self.txt_coil_st_report = QtWidgets.QTextEdit()
-        self.txt_coil_st_report.setReadOnly(True)
-        self.txt_coil_st_report.setMaximumHeight(160)
-        self.txt_coil_st_report.setStyleSheet("""
-            QTextEdit {
-                background-color: #0c0c0d; color: #f1c40f;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 9.5pt; border: 1px solid #3a3a3c; border-radius: 4px; padding: 6px;
-            }
-        """)
-        subtab_st_layout.addWidget(self.txt_coil_st_report, 1)
-        self.tab_sub_caracterizacao.addTab(subtab_stats, "📊 Análise Estatística de Caracterização")
-
-        coil_right_layout.addWidget(self.tab_sub_caracterizacao)
-        self.tab_sub_caracterizacao.currentChanged.connect(self.ao_mudar_subaba_caracterizacao)
-
-        self.splitter_tab_coil.addWidget(coil_left)
-        self.splitter_tab_coil.addWidget(coil_right)
-        self.splitter_tab_coil.setSizes([380, 1000])
-        self.splitter_tab_coil.splitterMoved.connect(self.reorganizar_colunas_seletores_caracterizacao)
-
-        tab_coil_outer_layout.addWidget(self.splitter_tab_coil)
-
-        # Conecta sinal de mudança de aba para carregar/atualizar os gráficos da Aba 4
+        # Conecta sinal de mudança de aba
         self.tab_widget.currentChanged.connect(self.ao_mudar_aba)
         
         # Variáveis para armazenar referências das curvas de banco de dados plotadas na Aba 4
@@ -2091,8 +2644,186 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         # Reconstrói a lista dinâmica de materiais e de bobinas no início
         self.atualizar_widgets_materiais()
-        self.atualizar_lista_radio_bobinas()
-        self.reorganizar_colunas_seletores_caracterizacao()
+        if hasattr(self, 'widget_radio_bobinas_container'):
+            self.atualizar_lista_radio_bobinas()
+            self.reorganizar_colunas_seletores_caracterizacao()
+
+        # Aplica botões e menus de expansão em tela cheia para cada gráfico individualmente
+        self.aplicar_tela_cheia_todos_graficos_individuais()
+
+    def abrir_container_tela_cheia(self, container_widget, title="Gráficos em Tela Cheia"):
+        if not container_widget:
+            return
+        orig_parent = container_widget.parentWidget()
+        dialog = FullScreenContainerDialog(container_widget, orig_parent, title=title, parent=self)
+        dialog.exec_()
+
+    def abrir_plot_individual_tela_cheia(self, plot_item, container_win, title="Gráfico Individual"):
+        if not plot_item or not container_win:
+            return
+        t_str = title if title else (plot_item.titleLabel.text if hasattr(plot_item, 'titleLabel') and plot_item.titleLabel and plot_item.titleLabel.text else "Gráfico Individual")
+
+        # Coleta todos os PlotItems presentes no container
+        todos_plots = []
+        if hasattr(container_win, 'ci') and hasattr(container_win.ci, 'items'):
+            for item in list(container_win.ci.items.keys()):
+                if isinstance(item, pg.PlotItem):
+                    todos_plots.append(item)
+
+        # Oculta os outros plots temporariamente para que plot_item ocupe 100% da grade
+        for p in todos_plots:
+            if p != plot_item:
+                p.setVisible(False)
+
+        orig_parent = container_win.parentWidget()
+        dialog = FullScreenContainerDialog(container_win, orig_parent, title=f"🔍 {t_str}", parent=self)
+
+        def restaurar_visibilidade_plots():
+            for p in todos_plots:
+                p.setVisible(True)
+                p.show()
+            try:
+                if hasattr(container_win, 'ci') and hasattr(container_win.ci, 'layout'):
+                    container_win.ci.layout.activate()
+                    container_win.ci.layout.update()
+            except Exception:
+                pass
+            container_win.update()
+            container_win.repaint()
+
+        dialog.finished.connect(restaurar_visibilidade_plots)
+        dialog.exec_()
+        restaurar_visibilidade_plots()
+
+    def configurar_expansao_grafico_individual(self, plot_item, container_win, title=None):
+        if not plot_item or not container_win:
+            return
+        t_str = title if title else (plot_item.titleLabel.text if hasattr(plot_item, 'titleLabel') and plot_item.titleLabel and plot_item.titleLabel.text else "Gráfico")
+
+        # 1. Adiciona botão mini '⛶' na barra de título do gráfico
+        try:
+            btn = QtWidgets.QPushButton("⛶")
+            btn.setFixedSize(24, 24)
+            btn.setToolTip(f"Expandir Apenas este Gráfico ({t_str}) em Tela Cheia")
+            btn.setCursor(QtCore.Qt.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #1e293b; color: #00e676; border: 1px solid #00e676;
+                    border-radius: 3px; font-weight: bold; font-size: 10pt; padding: 0px;
+                }
+                QPushButton:hover {
+                    background-color: #00e676; color: #000000; border: 1px solid #ffffff;
+                }
+            """)
+            btn.clicked.connect(lambda: self.abrir_plot_individual_tela_cheia(plot_item, container_win, t_str))
+
+            proxy = QtWidgets.QGraphicsProxyWidget()
+            proxy.setWidget(btn)
+            plot_item.layout.addItem(proxy, 0, 2)
+        except Exception:
+            pass
+
+        # 2. Adiciona item de menu de contexto (clique com botão direito)
+        try:
+            vb_menu = plot_item.getViewBox().menu
+            if vb_menu:
+                act = QtWidgets.QAction(f"🔍 Expandir Apenas Este Gráfico em Tela Cheia", self)
+                act.triggered.connect(lambda: self.abrir_plot_individual_tela_cheia(plot_item, container_win, t_str))
+                vb_menu.addAction(act)
+        except Exception:
+            pass
+
+    def aplicar_tela_cheia_todos_graficos_individuais(self):
+        # Módulo 1 Aba 1
+        if hasattr(self, 'win_plots'):
+            if hasattr(self, 'plot_bruto'): self.configurar_expansao_grafico_individual(self.plot_bruto, self.win_plots)
+            if hasattr(self, 'plot_decay'): self.configurar_expansao_grafico_individual(self.plot_decay, self.win_plots)
+            if hasattr(self, 'plot_trend'): self.configurar_expansao_grafico_individual(self.plot_trend, self.win_plots)
+
+        # Módulo 1 Aba 2
+        if hasattr(self, 'win_stats_plots'):
+            if hasattr(self, 'plot_stat_curves'): self.configurar_expansao_grafico_individual(self.plot_stat_curves, self.win_stats_plots)
+            if hasattr(self, 'plot_stat_auc'): self.configurar_expansao_grafico_individual(self.plot_stat_auc, self.win_stats_plots)
+            if hasattr(self, 'plot_stat_tau'): self.configurar_expansao_grafico_individual(self.plot_stat_tau, self.win_stats_plots)
+            if hasattr(self, 'plot_stat_scatter'): self.configurar_expansao_grafico_individual(self.plot_stat_scatter, self.win_stats_plots)
+
+        # Módulo 1 Aba 4
+        if hasattr(self, 'win_diag_plots'):
+            if hasattr(self, 'plot_diag_curves'): self.configurar_expansao_grafico_individual(self.plot_diag_curves, self.win_diag_plots)
+            if hasattr(self, 'plot_diag_auc'): self.configurar_expansao_grafico_individual(self.plot_diag_auc, self.win_diag_plots)
+            if hasattr(self, 'plot_diag_tau'): self.configurar_expansao_grafico_individual(self.plot_diag_tau, self.win_diag_plots)
+            if hasattr(self, 'plot_diag_scatter'): self.configurar_expansao_grafico_individual(self.plot_diag_scatter, self.win_diag_plots)
+
+        # Módulo 2 Sub-Aba 1
+        if hasattr(self, 'win_coil_plots'):
+            if hasattr(self, 'plot_coil_decay'): self.configurar_expansao_grafico_individual(self.plot_coil_decay, self.win_coil_plots)
+            if hasattr(self, 'plot_coil_tau_liftoff'): self.configurar_expansao_grafico_individual(self.plot_coil_tau_liftoff, self.win_coil_plots)
+            if hasattr(self, 'plot_coil_auc_liftoff'): self.configurar_expansao_grafico_individual(self.plot_coil_auc_liftoff, self.win_coil_plots)
+            if hasattr(self, 'plot_coil_l_liftoff'): self.configurar_expansao_grafico_individual(self.plot_coil_l_liftoff, self.win_coil_plots)
+
+        # Módulo 2 Sub-Aba 2
+        if hasattr(self, 'win_coil_rt_plots'):
+            if hasattr(self, 'plot_coil_rt_live'): self.configurar_expansao_grafico_individual(self.plot_coil_rt_live, self.win_coil_rt_plots)
+            if hasattr(self, 'plot_coil_rt_overlay'): self.configurar_expansao_grafico_individual(self.plot_coil_rt_overlay, self.win_coil_rt_plots)
+            if hasattr(self, 'plot_coil_rt_residual'): self.configurar_expansao_grafico_individual(self.plot_coil_rt_residual, self.win_coil_rt_plots)
+
+        # Módulo 2 Sub-Aba 3
+        if hasattr(self, 'win_coil_st_plots'):
+            if hasattr(self, 'plot_coil_st_decay'): self.configurar_expansao_grafico_individual(self.plot_coil_st_decay, self.win_coil_st_plots)
+            if hasattr(self, 'plot_coil_st_tau'): self.configurar_expansao_grafico_individual(self.plot_coil_st_tau, self.win_coil_st_plots)
+            if hasattr(self, 'plot_coil_st_auc'): self.configurar_expansao_grafico_individual(self.plot_coil_st_auc, self.win_coil_st_plots)
+            if hasattr(self, 'plot_coil_st_scatter'): self.configurar_expansao_grafico_individual(self.plot_coil_st_scatter, self.win_coil_st_plots)
+
+    def criar_barrafullscreen_container(self, container_widget, title="Painel de Gráficos"):
+        header_w = QtWidgets.QWidget()
+        header_l = QtWidgets.QHBoxLayout(header_w)
+        header_l.setContentsMargins(4, 2, 4, 2)
+
+        lbl = QtWidgets.QLabel(f"<b>{title}</b>")
+        lbl.setStyleSheet("color: #00e676; font-size: 9.5pt;")
+        header_l.addWidget(lbl)
+        header_l.addStretch()
+
+        btn = QtWidgets.QPushButton("⛶ Expandir Gráficos em Tela Cheia")
+        btn.setMinimumHeight(28)
+        btn.setCursor(QtCore.Qt.PointingHandCursor)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b; color: #00e676; border: 1px solid #00e676;
+                border-radius: 4px; font-weight: bold; font-size: 9pt; padding: 4px 12px;
+            }
+            QPushButton:hover {
+                background-color: #00e676; color: #000000; border: 1px solid #ffffff;
+            }
+        """)
+        btn.clicked.connect(lambda: self.abrir_container_tela_cheia(container_widget, title))
+        header_l.addWidget(btn)
+
+        # Adiciona atalho de duplo clique no container gráfico
+        if hasattr(container_widget, 'scene') and callable(container_widget.scene):
+            try:
+                old_dbl = container_widget.scene().mouseDoubleClickEvent
+                def dbl_handler(ev):
+                    self.abrir_container_tela_cheia(container_widget, title)
+                    if old_dbl:
+                        try: old_dbl(ev)
+                        except Exception: pass
+                container_widget.scene().mouseDoubleClickEvent = dbl_handler
+            except Exception:
+                pass
+
+        return header_w
+
+    def voltar_ao_menu_principal(self):
+        if hasattr(self, 'serial_thread') and self.serial_thread and self.serial_thread.running:
+            if hasattr(self, 'chk_auto_trigger'):
+                self.chk_auto_trigger.setChecked(False)
+            self.serial_thread.desconectar()
+        if self.launcher:
+            self.hide()
+            self.launcher.show()
+            self.launcher.raise_()
+            self.launcher.activateWindow()
 
     def ajustar_viewbox_secundaria(self):
         # Ajusta a escala da ViewBox secundária (AUC) para coincidir com o tamanho do gráfico
@@ -2288,11 +3019,15 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     # LÓGICA DE GERENCIAMENTO DE CONEXÃO
     # =====================================================================
     def atualizar_portas_disponiveis(self):
+        if not hasattr(self, 'combo_portas'):
+            return
         self.combo_portas.clear()
         portas = [p.device for p in serial.tools.list_ports.comports()]
         self.combo_portas.addItems(portas)
 
     def auto_detectar_e_conectar(self):
+        if not hasattr(self, 'combo_portas'):
+            return
         portas = list(serial.tools.list_ports.comports())
         porta_detectada = None
         for p in portas:
@@ -2310,15 +3045,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
     def alternar_conexao(self):
         if not self.serial_thread.running:
-            porta = self.combo_portas.currentText()
-            baud = int(self.combo_baud.currentText())
+            porta = self.combo_portas.currentText() if hasattr(self, 'combo_portas') else None
+            baud = int(self.combo_baud.currentText()) if hasattr(self, 'combo_baud') else 115200
             if not porta:
                 QtWidgets.QMessageBox.warning(self, "Sem portas", "Nenhuma porta COM ativa encontrada!")
                 return
             
             self.serial_thread.conectar(porta, baud)
-            self.lbl_status_conn.setText(f"Status: Conectado ({porta} @ {baud} bps)")
-            self.lbl_status_conn.setStyleSheet("color: #2ecc71; font-weight: bold;")
             self.btn_conectar.setText("Desconectar")
             self.btn_conectar.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold;")
             
@@ -3219,8 +3952,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
     def closeEvent(self, event):
         # Desconecta a serial antes de fechar a janela principal
-        self.chk_auto_trigger.setChecked(False)
-        self.serial_thread.desconectar()
+        if hasattr(self, 'chk_auto_trigger'):
+            self.chk_auto_trigger.setChecked(False)
+        if hasattr(self, 'serial_thread') and self.serial_thread:
+            self.serial_thread.desconectar()
         event.accept()
 
 
@@ -3511,11 +4246,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             estilo = ESTILOS_MATERIAIS.get(mat, QtCore.Qt.SolidLine)
             
             nome_legenda = f"{mat} ({cls})"
-            self.plot_stat_curves.plot(
+            curve_item = self.plot_stat_curves.plot(
                 t, mean, 
                 pen=pg.mkPen(color, width=3, style=estilo), 
                 name=nome_legenda
             )
+            curve_item.mat_name = mat
+            curve_item.cls_name = cls
+            curve_item.num_curvas = len(curvas)
             
             # Sombreamento de DP
             y_min = np.clip(mean - std, 0, None)
@@ -3652,73 +4390,224 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                                                 symbolBrush=pg.mkBrush(rgb[0], rgb[1], rgb[2], 200),
                                                 symbolPen=pg.mkPen('w', width=0.5), name=f"{c.capitalize()} ({mat_nome})")
 
+    def calcular_distancia_pixel_curva(self, vb, item, pos):
+        """
+        Calcula a menor distância em pixels da cena (pos) até a linha gráfica (PlotDataItem),
+        avaliando a distância aos segmentos de reta entre vértices. Funciona 100% perfeitamente sob qualquer nível de ZOOM.
+        """
+        x_arr, y_arr = item.xData, item.yData
+        if x_arr is None or y_arr is None or len(x_arr) < 2:
+            return float('inf'), None
+
+        mouse_pt = vb.mapSceneToView(pos)
+        mx = mouse_pt.x()
+
+        idx = np.searchsorted(x_arr, mx)
+        idx_start = max(0, idx - 12)
+        idx_end = min(len(x_arr) - 1, idx + 12)
+
+        px, py = pos.x(), pos.y()
+        menor_dist = float('inf')
+        melhor_pt = None
+
+        for i in range(idx_start, idx_end):
+            p1_scene = vb.mapViewToScene(pg.Point(x_arr[i], y_arr[i]))
+            p2_scene = vb.mapViewToScene(pg.Point(x_arr[i+1], y_arr[i+1]))
+
+            ax, ay = p1_scene.x(), p1_scene.y()
+            bx, by = p2_scene.x(), p2_scene.y()
+
+            dx = bx - ax
+            dy = by - ay
+            if dx == 0 and dy == 0:
+                dist = np.hypot(px - ax, py - ay)
+                t_proj = 0.0
+            else:
+                t_proj = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+                proj_x = ax + t_proj * dx
+                proj_y = ay + t_proj * dy
+                dist = np.hypot(px - proj_x, py - proj_y)
+
+            if dist < menor_dist:
+                menor_dist = dist
+                pt_x = float(x_arr[i] + t_proj * (x_arr[i+1] - x_arr[i]))
+                pt_y = float(y_arr[i] + t_proj * (y_arr[i+1] - y_arr[i]))
+                melhor_pt = (pt_x, pt_y)
+
+        return menor_dist, melhor_pt
+
+    def is_tooltip_enabled(self):
+        if hasattr(self, 'chk_enable_tooltips') and not self.chk_enable_tooltips.isChecked():
+            return False
+        if hasattr(self, 'chk_coil_enable_tooltips') and not self.chk_coil_enable_tooltips.isChecked():
+            return False
+        return True
+
+    def ao_alternar_exibicao_tooltips(self):
+        if not self.is_tooltip_enabled():
+            if hasattr(self, 'floating_tooltip'):
+                self.floating_tooltip.fechar_tooltip()
+            self.atualizar_destaque_visual_hover(target_plot=None)
+
+    def ao_clicar_mouse_grafico(self, event):
+        """
+        Gerencia cliques do mouse nos gráficos para FIXAR (pin) ou DESFIXAR o tooltip.
+        """
+        if not hasattr(self, 'floating_tooltip') or not self.is_tooltip_enabled():
+            return
+
+        # Se há um destaque visual ativo sob o cursor, FIXA o tooltip!
+        if getattr(self, '_current_hl_plot', None) and self.floating_tooltip.isVisible():
+            self.floating_tooltip.fixar_tooltip()
+        elif self.floating_tooltip.is_pinned:
+            # Clique em área vazia desfixa e fecha o tooltip
+            self.floating_tooltip.fechar_tooltip()
+
+    def atualizar_destaque_visual_hover(self, target_plot=None, pt_coords=None, line_coords=None, symbol='o'):
+        """
+        Desenha um destaque brilhante neon sobre o ponto ou linha sob o cursor do mouse.
+        Se target_plot for None, remove todos os destaques visuais ativos e esconde o tooltip (se não estiver fixado).
+        """
+        if hasattr(self, 'floating_tooltip') and self.floating_tooltip.is_pinned and target_plot is None:
+            return
+
+        if not hasattr(self, '_hl_point_item'):
+            self._hl_point_item = pg.ScatterPlotItem(
+                size=18,
+                pen=pg.mkPen('#00ffff', width=2.5),
+                brush=pg.mkBrush(255, 255, 0, 220)
+            )
+            self._hl_line_item = pg.PlotDataItem(
+                pen=pg.mkPen('#ffff00', width=4.5)
+            )
+            self._current_hl_plot = None
+
+        if self._current_hl_plot and (self._current_hl_plot != target_plot or target_plot is None):
+            try:
+                if self._hl_point_item in self._current_hl_plot.items:
+                    self._current_hl_plot.removeItem(self._hl_point_item)
+                if self._hl_line_item in self._current_hl_plot.items:
+                    self._current_hl_plot.removeItem(self._hl_line_item)
+            except Exception:
+                pass
+            self._current_hl_plot = None
+
+        if target_plot is None:
+            if hasattr(self, 'floating_tooltip') and not self.floating_tooltip.is_pinned:
+                self.floating_tooltip.hide()
+            return
+
+        # Aplica destaque em PONTO
+        if pt_coords is not None:
+            px, py = pt_coords
+            self._hl_point_item.setData(x=[px], y=[py], symbol=symbol)
+            if self._hl_point_item not in target_plot.items:
+                target_plot.addItem(self._hl_point_item)
+            if self._hl_line_item in target_plot.items:
+                target_plot.removeItem(self._hl_line_item)
+            self._current_hl_plot = target_plot
+
+        # Aplica destaque em LINHA DE DECAIMENTO
+        elif line_coords is not None:
+            lx, ly = line_coords
+            self._hl_line_item.setData(lx, ly)
+            if self._hl_line_item not in target_plot.items:
+                target_plot.addItem(self._hl_line_item)
+            if self._hl_point_item in target_plot.items:
+                target_plot.removeItem(self._hl_point_item)
+            self._current_hl_plot = target_plot
+
     def ao_mover_mouse_estatistico(self, pos):
+        if not self.is_tooltip_enabled():
+            return
         if not hasattr(self, 'amostras_filtradas') or not self.amostras_filtradas:
             return
             
         melhor_amostra = None
-        menor_dist_pixel = 15.0  # Limite de 15 pixels para capturar o ponto
+        melhor_plot = None
+        melhor_pt_x, melhor_pt_y = None, None
+        hover_decay_info = None
+        menor_dist_pixel = 18.0
         
-        for plot, tipo_grafico in [
-            (self.plot_stat_scatter, "scatter"),
-            (self.plot_stat_auc, "auc"),
-            (self.plot_stat_tau, "tau")
-        ]:
-            vb = plot.vb
-            if vb.sceneBoundingRect().contains(pos):
-                mouse_point = vb.mapSceneToView(pos)
-                
-                for amostra in self.amostras_filtradas:
-                    if tipo_grafico == "scatter":
-                        x_pts, y_pts = amostra["tau"], amostra["auc"]
-                    elif tipo_grafico == "auc":
-                        x_pts = amostra.get("pos_x_auc_plot", 0.0)
-                        y_pts = amostra["auc"]
-                    elif tipo_grafico == "tau":
-                        x_pts = amostra.get("pos_x_tau_plot", 0.0)
-                        y_pts = amostra["tau"]
-                    else:
-                        continue
-                        
-                    p_point = vb.mapViewToScene(QtCore.QPointF(x_pts, y_pts))
-                    dist_px = pg.Point(p_point - pos).length()
-                    
-                    if dist_px < menor_dist_pixel:
+        # 1. Verifica se o mouse está sobre o gráfico de Curvas Médias de Decaimento (plot_stat_curves)
+        vb_curves = self.plot_stat_curves.vb
+        if vb_curves.sceneBoundingRect().contains(pos):
+            for item in self.plot_stat_curves.items:
+                if isinstance(item, pg.PlotDataItem) and item.name:
+                    dist_px, pt_coord = self.calcular_distancia_pixel_curva(vb_curves, item, pos)
+                    if dist_px < 25.0 and dist_px < menor_dist_pixel:
                         menor_dist_pixel = dist_px
-                        melhor_amostra = amostra
+                        hover_decay_info = {
+                            "nome": item.name,
+                            "mat": getattr(item, 'mat_name', 'Múltiplos'),
+                            "cls": getattr(item, 'cls_name', 'Filtrado'),
+                            "num": getattr(item, 'num_curvas', len(self.amostras_filtradas)),
+                            "t": pt_coord[0],
+                            "y": pt_coord[1],
+                            "x_arr": item.xData,
+                            "y_arr": item.yData
+                        }
+        else:
+            for plot, tipo_grafico in [
+                (self.plot_stat_scatter, "scatter"),
+                (self.plot_stat_auc, "auc"),
+                (self.plot_stat_tau, "tau")
+            ]:
+                vb = plot.vb
+                if vb.sceneBoundingRect().contains(pos):
+                    mouse_point = vb.mapSceneToView(pos)
+                    
+                    for amostra in self.amostras_filtradas:
+                        if tipo_grafico == "scatter":
+                            x_pts, y_pts = amostra["tau"], amostra["auc"]
+                        elif tipo_grafico == "auc":
+                            x_pts = amostra.get("pos_x_auc_plot", 0.0)
+                            y_pts = amostra["auc"]
+                        elif tipo_grafico == "tau":
+                            x_pts = amostra.get("pos_x_tau_plot", 0.0)
+                            y_pts = amostra["tau"]
+                        else:
+                            continue
+                            
+                        p_point = vb.mapViewToScene(QtCore.QPointF(x_pts, y_pts))
+                        dist_px = pg.Point(p_point - pos).length()
+                        
+                        if dist_px < menor_dist_pixel:
+                            menor_dist_pixel = dist_px
+                            melhor_amostra = amostra
+                            melhor_plot = plot
+                            melhor_pt_x, melhor_pt_y = x_pts, y_pts
+                    break
                 
-                # Encontrou o viewbox sob o mouse, encerra a verificação dos outros plots
-                break
-                
-        if melhor_amostra:
+        if hover_decay_info:
+            self.atualizar_destaque_visual_hover(target_plot=self.plot_stat_curves, line_coords=(hover_decay_info['x_arr'], hover_decay_info['y_arr']))
+            tooltip_text = (
+                f"📈 <b>CURVA MÉDIA DE DECAIMENTO V(t)</b><br>"
+                f"--------------------------------------------------<br>"
+                f"📁 <b>Origem / Dataset:</b> Base de Dados Filtrada (N={hover_decay_info['num']} amostras)<br>"
+                f"🛡️ <b>Material:</b> {hover_decay_info['mat']}<br>"
+                f"📊 <b>Estado / Classe de Corrosão:</b> {hover_decay_info['cls'].capitalize()}<br>"
+                f"--------------------------------------------------<br>"
+                f"⏱️ <b>Ponto Cursor:</b> t = {hover_decay_info['t']:.2f} &mu;s | V(t) = {hover_decay_info['y']:.1f} ADC Counts"
+            )
+            self.floating_tooltip.exibir_hover(QtGui.QCursor.pos(), tooltip_text, target_plot=self.plot_stat_curves)
+        elif melhor_amostra:
+            simb = SIMBOLOS_MATERIAIS.get(melhor_amostra.get("material"), "o")
+            self.atualizar_destaque_visual_hover(target_plot=melhor_plot, pt_coords=(melhor_pt_x, melhor_pt_y), symbol=simb)
             cor_hex = melhor_amostra.get("color_hex", "#3498db")
             color_badge = f"<span style='color: {cor_hex}; font-size: 14pt;'>■</span> " if "color_hex" in melhor_amostra else ""
             tooltip_text = (
+                f"📍 <b>PONTO DE MEDIÇÃO ESTATÍSTICO</b><br>"
+                f"--------------------------------------------------<br>"
                 f"{color_badge}🆔 <b>ID Cupom:</b> {melhor_amostra['id']}<br>"
-                f"🛡️ <b>Mat:</b> {melhor_amostra['material']}<br>"
-                f"📊 <b>Classe:</b> {melhor_amostra['classe'].capitalize()}<br>"
-                f"⏱️ <b>Tau:</b> {melhor_amostra['tau']:.3f} &mu;s<br>"
-                f"📐 <b>AUC:</b> {melhor_amostra['auc']:.1f}"
+                f"🛡️ <b>Material:</b> {melhor_amostra['material']}<br>"
+                f"📊 <b>Classe de Corrosão:</b> {melhor_amostra['classe'].capitalize()}<br>"
+                f"⚡ <b>Constante de Tempo (&tau;):</b> {melhor_amostra['tau']:.4f} &mu;s<br>"
+                f"📐 <b>Área Sob a Curva (AUC):</b> {melhor_amostra['auc']:.1f} Counts.&mu;s"
             )
-            
-            # Atualiza o texto (suporta rich text HTML)
-            self.tooltip_estatistico.setText(tooltip_text)
-            self.tooltip_estatistico.adjustSize()
-            
-            # Converte as coordenadas do evento da cena para coordenadas locais do GraphicsLayoutWidget
-            widget_pos = self.win_stats_plots.mapFromScene(pos)
-            # Converte de coordenadas do GraphicsLayoutWidget para coordenadas da janela principal (self)
-            parent_pos = self.win_stats_plots.mapTo(self, widget_pos)
-            
-            # Move o balão ligeiramente deslocado do cursor
-            self.tooltip_estatistico.move(parent_pos.x() + 15, parent_pos.y() + 15)
-            
-            if not self.tooltip_estatistico.isVisible():
-                self.tooltip_estatistico.show()
-                self.tooltip_estatistico.raise_()
+            self.floating_tooltip.exibir_hover(QtGui.QCursor.pos(), tooltip_text, target_plot=melhor_plot)
         else:
-            if self.tooltip_estatistico.isVisible():
-                self.tooltip_estatistico.hide()
+            self.atualizar_destaque_visual_hover(target_plot=None)
 
     def carregar_lista_materiais(self):
         materiais = list(self.default_materials)
@@ -3839,31 +4728,32 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     self.todos_materiais.insert(idx, mat)
 
         # --- ABA 1 (AQUISIÇÃO) ---
-        while self.layout_mat_radios.count():
-            child = self.layout_mat_radios.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+        if hasattr(self, 'layout_mat_radios'):
+            while self.layout_mat_radios.count():
+                child = self.layout_mat_radios.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+                    
+            for btn in list(self.group_mat.buttons()):
+                self.group_mat.removeButton(btn)
                 
-        for btn in list(self.group_mat.buttons()):
-            self.group_mat.removeButton(btn)
+            self.radio_buttons_material.clear()
             
-        self.radio_buttons_material.clear()
-        
-        for idx, mat_nome in enumerate(self.todos_materiais):
-            rad = QtWidgets.QRadioButton(mat_nome)
-            rad.setStyleSheet(self.radio_stylesheet)
-            self.group_mat.addButton(rad)
-            self.radio_buttons_material[mat_nome] = rad
-            
-            row = idx // 2
-            col = idx % 2
-            self.layout_mat_radios.addWidget(rad, row, col)
-            
-            if mat_nome == "Ar Livre":
-                rad.toggled.connect(self.ao_toggle_ar_livre_material)
+            for idx, mat_nome in enumerate(self.todos_materiais):
+                rad = QtWidgets.QRadioButton(mat_nome)
+                rad.setStyleSheet(self.radio_stylesheet)
+                self.group_mat.addButton(rad)
+                self.radio_buttons_material[mat_nome] = rad
                 
-        if "A36 Comum" in self.radio_buttons_material:
-            self.radio_buttons_material["A36 Comum"].setChecked(True)
+                row = idx // 2
+                col = idx % 2
+                self.layout_mat_radios.addWidget(rad, row, col)
+                
+                if mat_nome == "Ar Livre":
+                    rad.toggled.connect(self.ao_toggle_ar_livre_material)
+                    
+            if "A36 Comum" in self.radio_buttons_material:
+                self.radio_buttons_material["A36 Comum"].setChecked(True)
             
         # --- ABA 2 (ESTATÍSTICA) ---
         if hasattr(self, 'layout_filter_materiais'):
@@ -4367,6 +5257,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         """
         Exibe balão tooltip detalhado ao passar o cursor sobre qualquer ponto nos gráficos da 5ª Aba.
         """
+        if not self.is_tooltip_enabled():
+            return
         if not hasattr(self, 'loaded_coil_records') or not self.loaded_coil_records:
             if hasattr(self, 'tooltip_estatistico') and self.tooltip_estatistico.isVisible():
                 self.tooltip_estatistico.hide()
@@ -4390,40 +5282,62 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         melhor_rec = None
         melhor_sample_idx = None
+        melhor_plot = None
+        melhor_pt_x, melhor_pt_y = None, None
+        hover_decay_pt = None
+        hover_decay_coords = None
         menor_dist_px = float('inf')
 
         for plot_item in plots:
             vb = plot_item.vb
             if vb.sceneBoundingRect().contains(pos):
-                for rec in records:
-                    all_t = rec.get("all_taus", [rec.get("tau", 0.0)])
-                    all_a = rec.get("all_aucs", [rec.get("auc", 0.0)])
-                    all_l = rec.get("all_l_efetivas", [rec.get("l_efetiva_uh", 0.0)])
-                    dist_v = rec.get("distancia_mm", 0.0)
-
-                    # Testar pontos individuais
-                    for idx_sample in range(len(all_t)):
-                        if plot_item == self.plot_coil_tau_liftoff:
-                            pt_x, pt_y = dist_v, all_t[idx_sample]
-                        elif plot_item == self.plot_coil_auc_liftoff:
-                            pt_x, pt_y = dist_v, all_a[idx_sample]
-                        elif plot_item == self.plot_coil_l_liftoff:
-                            pt_x, pt_y = dist_v, all_l[idx_sample]
-                        else:
-                            continue
-
-                        pt_pixel = vb.mapViewToScene(pg.Point(pt_x, pt_y))
-                        dx = pos.x() - pt_pixel.x()
-                        dy = pos.y() - pt_pixel.y()
-                        dist_px = np.hypot(dx, dy)
-
-                        if dist_px < 22 and dist_px < menor_dist_px:
-                            menor_dist_px = dist_px
-                            melhor_rec = rec
-                            melhor_sample_idx = idx_sample
+                if plot_item == self.plot_coil_decay:
+                    for item in plot_item.items:
+                        if isinstance(item, pg.PlotDataItem) and hasattr(item, 'rec_data'):
+                            rec = item.rec_data
+                            dist_px, pt_coord = self.calcular_distancia_pixel_curva(vb, item, pos)
+                            if dist_px < 25.0 and dist_px < menor_dist_px:
+                                menor_dist_px = dist_px
+                                melhor_rec = rec
+                                hover_decay_pt = pt_coord
+                                hover_decay_coords = (item.xData, item.yData)
+                else:
+                    for item in plot_item.items:
+                        if hasattr(item, 'rec_data'):
+                            rec = item.rec_data
+                            if isinstance(item, pg.ScatterPlotItem):
+                                x_data, y_data = item.getData()
+                                if x_data is not None and y_data is not None:
+                                    for i_sp in range(len(x_data)):
+                                        pt_pixel = vb.mapViewToScene(pg.Point(x_data[i_sp], y_data[i_sp]))
+                                        dist_px = np.hypot(pos.x() - pt_pixel.x(), pos.y() - pt_pixel.y())
+                                        if dist_px < 22.0 and dist_px < menor_dist_px:
+                                            menor_dist_px = dist_px
+                                            melhor_rec = rec
+                                            melhor_sample_idx = i_sp
+                                            melhor_plot = plot_item
+                                            melhor_pt_x, melhor_pt_y = x_data[i_sp], y_data[i_sp]
+                            elif isinstance(item, pg.PlotDataItem):
+                                x_arr, y_arr = item.xData, item.yData
+                                if x_arr is not None and y_arr is not None:
+                                    for i_sp in range(len(x_arr)):
+                                        pt_pixel = vb.mapViewToScene(pg.Point(x_arr[i_sp], y_arr[i_sp]))
+                                        dist_px = np.hypot(pos.x() - pt_pixel.x(), pos.y() - pt_pixel.y())
+                                        if dist_px < 22.0 and dist_px < menor_dist_px:
+                                            menor_dist_px = dist_px
+                                            melhor_rec = rec
+                                            melhor_sample_idx = 0
+                                            melhor_plot = plot_item
+                                            melhor_pt_x, melhor_pt_y = x_arr[i_sp], y_arr[i_sp]
                 break
 
         if melhor_rec:
+            if hover_decay_coords is not None:
+                self.atualizar_destaque_visual_hover(target_plot=self.plot_coil_decay, line_coords=hover_decay_coords)
+            elif melhor_plot is not None and melhor_pt_x is not None:
+                simb = obter_simbolo_material(melhor_rec.get("material"))
+                self.atualizar_destaque_visual_hover(target_plot=melhor_plot, pt_coords=(melhor_pt_x, melhor_pt_y), symbol=simb)
+
             n_tot = melhor_rec.get("num_samples", 1)
             if melhor_sample_idx is not None and n_tot > 1:
                 tau_pt = melhor_rec.get("all_taus", [melhor_rec["tau"]])[melhor_sample_idx]
@@ -4436,34 +5350,47 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 l_pt = melhor_rec["l_efetiva_uh"]
                 sample_str = f"{melhor_rec['id_amostra']}"
 
-            tooltip_text = (
-                f"📁 <b>Arquivo:</b> {melhor_rec['filename']}<br>"
-                f"🆔 <b>Amostra:</b> {sample_str}<br>"
-                f"📍 <b>Local:</b> {melhor_rec.get('local', 'Não Especificado')}<br>"
-                f"🧲 <b>Bobina:</b> ID {melhor_rec['id_bobina']} ({melhor_rec['indutancia_uh']:.1f} &mu;H)<br>"
-                f"🛡️ <b>Material:</b> {melhor_rec['material']}<br>"
-                f"📊 <b>Estado:</b> {melhor_rec['classe'].capitalize()}<br>"
-                f"📏 <b>Distância (Lift-Off):</b> {melhor_rec['distancia_mm']:.2f} mm<br>"
-                f"⏱️ <b>Tau (&tau;):</b> {tau_pt:.4f} &mu;s<br>"
-                f"📐 <b>AUC:</b> {auc_pt:.1f} Counts.&mu;s<br>"
-                f"⚡ <b>L Efetiva:</b> {l_pt:.2f} &mu;H"
-            )
-            if n_tot > 1:
-                tooltip_text += f"<br>📊 <b>Total no CSV:</b> N={n_tot} (Média &tau;: {melhor_rec['tau']:.4f} &mu;s)"
+            estilo_nome = {
+                "A36 Comum": "Contínua (Solid)",
+                "A36 GE": "Tracejada (Dash)",
+                "A36 GF": "Pontilhada (Dot)",
+                "Estrutura Torre": "Traço-Ponto (DashDot)",
+                "Ar Livre": "Contínua (Solid)"
+            }.get(melhor_rec.get("material"), "Padrão")
 
-            self.tooltip_estatistico.setText(tooltip_text)
-            self.tooltip_estatistico.adjustSize()
-            
-            widget_pos = self.win_coil_plots.mapFromScene(pos)
-            parent_pos = self.win_coil_plots.mapTo(self, widget_pos)
-            self.tooltip_estatistico.move(parent_pos.x() + 15, parent_pos.y() + 15)
-            
-            if not self.tooltip_estatistico.isVisible():
-                self.tooltip_estatistico.show()
-                self.tooltip_estatistico.raise_()
+            manual_adj = "Sim" if melhor_rec.get("ajuste_manual_liftoff", False) else "Não"
+            local_str = melhor_rec.get("local", "Não Especificado")
+            ind_uh = melhor_rec.get("indutancia_uh", 0.0)
+
+            cursor_info = ""
+            if hover_decay_pt is not None:
+                cursor_info = f"⏱️ <b>Ponto Cursor:</b> t = {hover_decay_pt[0]:.2f} &mu;s | V(t) = {hover_decay_pt[1]:.1f} ADC Counts<br>"
+
+            header_title = "📈 <b>CURVA TRANSIENTE COMPARATIVA DE DECAIMENTO V(t)</b>" if hover_decay_pt is not None else "📍 <b>PONTO DE CARACTERIZAÇÃO LIFT-OFF</b>"
+
+            tooltip_text = (
+                f"{header_title}<br>"
+                f"--------------------------------------------------<br>"
+                f"📁 <b>Referência de Arquivo:</b> {melhor_rec['filename']}<br>"
+                f"🛡️ <b>Material:</b> {melhor_rec['material']} <i>[{estilo_nome}]</i><br>"
+                f"📊 <b>Estado / Classe de Corrosão:</b> {melhor_rec['classe'].capitalize()}<br>"
+                f"🆔 <b>Amostra (ID):</b> {sample_str}<br>"
+                f"📍 <b>Local de Coleta:</b> {local_str}<br>"
+                f"🧲 <b>Sensor / Bobina:</b> ID {melhor_rec['id_bobina']} (L<sub>nom</sub> = {ind_uh:.1f} &mu;H)<br>"
+                f"📏 <b>Afastamento (Lift-Off):</b> {melhor_rec['distancia_mm']:.2f} mm<br>"
+                f"--------------------------------------------------<br>"
+                f"{cursor_info}"
+                f"⚡ <b>Constante de Tempo (&tau;):</b> {tau_pt:.4f} &mu;s<br>"
+                f"📐 <b>Área Sob a Curva (AUC):</b> {auc_pt:.1f} Counts.&mu;s<br>"
+                f"🧲 <b>Indutância Efetiva (L<sub>ef</sub>):</b> {l_pt:.2f} &mu;H<br>"
+                f"🔧 <b>Ajuste Manual Lift-Off:</b> {manual_adj}<br>"
+                f"📊 <b>Amostragens no Lote:</b> N = {n_tot}"
+            )
+
+            target_p = self.plot_coil_decay if hover_decay_coords is not None else melhor_plot
+            self.floating_tooltip.exibir_hover(QtGui.QCursor.pos(), tooltip_text, target_plot=target_p)
         else:
-            if hasattr(self, 'tooltip_estatistico') and self.tooltip_estatistico.isVisible():
-                self.tooltip_estatistico.hide()
+            self.atualizar_destaque_visual_hover(target_plot=None)
 
     def reorganizar_grid_widgets(self, grid_layout, widgets_list, num_cols):
         if not grid_layout or not widgets_list:
@@ -4848,6 +5775,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.txt_coil_report.clear()
         self.txt_coil_report.setText("Aguardando carregamento de ensaios para gerar relatório comparativo...")
 
+    def atualizar_todos_graficos_caracterizacao(self, *args):
+        self.atualizar_graficos_comparacao_bobinas()
+        self.atualizar_graficos_estatistica_caracterizacao()
+
     def atualizar_graficos_comparacao_bobinas(self):
         # Limpa plots
         self.plot_coil_decay.clear()
@@ -4866,25 +5797,65 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.txt_coil_report.setText("Nenhum registro selecionado.")
             return
 
+        # Aplica Filtros de Exibição (Materiais e Classes)
+        if hasattr(self, 'coil_filter_checkboxes_material'):
+            mats_ok = [m for m, chk in self.coil_filter_checkboxes_material.items() if chk.isChecked()]
+            cls_map = {
+                "Saudável": getattr(self, 'chk_coil_filter_saudavel', None),
+                "Leve": getattr(self, 'chk_coil_filter_leve', None),
+                "Moderada": getattr(self, 'chk_coil_filter_moderada', None),
+                "Avançada": getattr(self, 'chk_coil_filter_avancada', None),
+                "Corroído": getattr(self, 'chk_coil_filter_corroido', None),
+                "Ar Livre": getattr(self, 'chk_coil_filter_ar_cls', None)
+            }
+            cls_ok = [c for c, chk in cls_map.items() if chk is None or chk.isChecked()]
+            recs_para_plotar = [r for r in recs_para_plotar if r.get("material", "A36 Comum") in mats_ok and r.get("classe", "Saudável") in cls_ok]
+
+        if not recs_para_plotar:
+            self.txt_coil_report.setText("Nenhum registro corresponde aos filtros de exibição selecionados.")
+            return
+
         # Cores para curvas
         paleta_cores = ["#00e676", "#29b6f6", "#ab47bc", "#ffca28", "#ff7043", "#ec407a", "#26a69a", "#78909c", "#e040fb", "#18ffff"]
         
-        # 1. Plotar Curvas Transientes V(t) usando as cores padronizadas por Classe de Corrosão
+        use_id_shading = hasattr(self, 'chk_diferenciar_ids_tonalidade') and self.chk_diferenciar_ids_tonalidade.isChecked()
+
+        # Mapeamento de tonalidade (luminosidade HSL) por arquivo/amostra se use_id_shading for True
+        id_to_lightness = {}
+        if use_id_shading and recs_para_plotar:
+            ids_unicos = sorted(list(set([str(r.get("id_amostra", r.get("filename", ""))) for r in recs_para_plotar])))
+            num_ids = len(ids_unicos)
+            for idx_id, id_val in enumerate(ids_unicos):
+                l_factor = 0.35 + 0.50 * (idx_id / max(1, num_ids - 1)) if num_ids > 1 else 0.55
+                id_to_lightness[id_val] = l_factor
+
+        # 1. Plotar Curvas Transientes V(t) usando as cores padronizadas e tracejados por Material
         for idx, rec in enumerate(recs_para_plotar):
-            cor = obter_cor_classe(rec.get("classe", "Saudável"))
+            cor_base_hex = obter_cor_classe(rec.get("classe", "Saudável"))
+            if use_id_shading:
+                base_qcol = QtGui.QColor(cor_base_hex)
+                h, s, l_val, a_alpha = base_qcol.getHslF()
+                target_l = id_to_lightness.get(str(rec.get("id_amostra", rec.get("filename", ""))), 0.55)
+                cor_hex = QtGui.QColor.fromHslF(h, min(1.0, s * 1.05), max(0.25, min(0.90, target_l))).name()
+            else:
+                cor_hex = cor_base_hex
+
+            estilo = obter_estilo_material(rec.get("material", "A36 Comum"))
             t_us = np.arange(len(rec["curva"])) * rec["dt_us"]
             label = f"B.{rec['id_bobina']} ({rec['distancia_mm']}mm, {rec['material']}, {rec['classe']})"
             
-            # Se o CSV possui multi-amostras, plota curvas individuais translúcidas de fundo
+            # Se o CSV possui multi-amostras, plota amostragem de curvas translúcidas de fundo
             all_curves = rec.get("all_curves", [])
             if len(all_curves) > 1:
-                pen_indiv = pg.mkPen(color=cor, width=0.7)
-                for single_c in all_curves:
+                pen_indiv = pg.mkPen(color=cor_hex, width=0.6, style=estilo)
+                step_c = max(1, len(all_curves) // 20)
+                for single_c in all_curves[::step_c]:
                     self.plot_coil_decay.plot(t_us, single_c, pen=pen_indiv)
 
-            # Plota curva média com linha em destaque
-            pen = pg.mkPen(color=cor, width=2.5)
-            self.plot_coil_decay.plot(t_us, rec["curva"], pen=pen, name=label)
+            # Plota curva média com linha em destaque e estilo por material
+            pen = pg.mkPen(color=cor_hex, width=2.5, style=estilo)
+            curve_item = self.plot_coil_decay.plot(t_us, rec["curva"], pen=pen, name=label)
+            curve_item.rec_data = rec
 
         # 2. Agrupar registros por (id_bobina, material, classe) para montar curvas de Lift-Off (vs distância)
         grupos = {}
@@ -4911,7 +5882,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
             cor_base = obter_cor_classe(cls_name)
             simbolo = obter_simbolo_material(mat_name)
-            pen_mean = pg.mkPen(color=cor_base, width=2.5, style=QtCore.Qt.DashLine)
+            pen_mean = pg.mkPen(color=cor_base, width=2.5, style=obter_estilo_material(mat_name))
             symbol_pen = pg.mkPen(color=cor_base)
 
             label = f"Bobina {b_id} | {mat_name} ({cls_name})"
@@ -4920,52 +5891,54 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             num_ids = len(ids_unicos)
             id_to_lightness = {id_v: (0.35 + 0.50 * (i / max(1, num_ids - 1)) if num_ids > 1 else 0.55) for i, id_v in enumerate(ids_unicos)}
 
-            # 2.1 Plotar todos os pontos individuais de cada arquivo (Scatter Plot com símbolos e cores padronizados)
+            # 2.1 Plotar todos os pontos individuais em lote (ScatterPlotItem vetorizado - 1000x mais rápido)
             for r in g_recs_sorted:
                 d_val = r["distancia_mm"]
                 id_str = str(r.get("id_amostra", "1"))
-                all_t = r.get("all_taus", [r["tau"]])
-                all_a = r.get("all_aucs", [r["auc"]])
-                all_l = r.get("all_l_efetivas", [r["l_efetiva_uh"]])
+                all_t = np.array(r.get("all_taus", [r["tau"]]))
+                all_a = np.array(r.get("all_aucs", [r["auc"]]))
+                all_l = np.array(r.get("all_l_efetivas", [r["l_efetiva_uh"]]))
+
+                # Aplica filtro IQR individualmente por arquivo / medição
+                if hasattr(self, 'chk_coil_filter_outliers') and self.chk_coil_filter_outliers.isChecked() and len(all_t) >= 4:
+                    q25_t, q75_t = np.percentile(all_t, [25, 75])
+                    iqr_t = q75_t - q25_t
+                    q25_a, q75_a = np.percentile(all_a, [25, 75])
+                    iqr_a = q75_a - q25_a
+
+                    mask = (all_t >= q25_t - 1.5 * iqr_t) & (all_t <= q75_t + 1.5 * iqr_t) & \
+                           (all_a >= q25_a - 1.5 * iqr_a) & (all_a <= q75_a + 1.5 * iqr_a)
+                    if np.sum(mask) >= 3:
+                        all_t = all_t[mask]
+                        all_a = all_a[mask]
+                        all_l = all_l[mask]
 
                 d_pts = [d_val] * len(all_t)
 
                 base_qcol = QtGui.QColor(cor_base)
-                h, s, l_val, a_alpha = base_qcol.getHslF()
-                target_l = id_to_lightness.get(id_str, 0.55)
-                adj_qcol = QtGui.QColor.fromHslF(h, min(1.0, s * 1.05), max(0.25, min(0.90, target_l)))
-                adj_qcol.setAlpha(150)
-                brush_scatter = pg.mkBrush(adj_qcol)
+                if use_id_shading:
+                    h, s, l_val, a_alpha = base_qcol.getHslF()
+                    target_l = id_to_lightness.get(id_str, 0.55)
+                    adj_qcol = QtGui.QColor.fromHslF(h, min(1.0, s * 1.05), max(0.25, min(0.90, target_l)))
+                    adj_qcol.setAlpha(180)
+                    brush_scatter = pg.mkBrush(adj_qcol)
+                else:
+                    brush_scatter = pg.mkBrush(cor_base)
 
-                self.plot_coil_tau_liftoff.plot(d_pts, all_t, pen=None, symbol=simbolo, symbolSize=7, symbolBrush=brush_scatter, symbolPen=None)
-                self.plot_coil_auc_liftoff.plot(d_pts, all_a, pen=None, symbol=simbolo, symbolSize=7, symbolBrush=brush_scatter, symbolPen=None)
-                self.plot_coil_l_liftoff.plot(d_pts, all_l, pen=None, symbol=simbolo, symbolSize=7, symbolBrush=brush_scatter, symbolPen=None)
+                sp_t = pg.ScatterPlotItem(x=d_pts, y=all_t, symbol=simbolo, size=7, brush=brush_scatter, pen=None)
+                sp_a = pg.ScatterPlotItem(x=d_pts, y=all_a, symbol=simbolo, size=7, brush=brush_scatter, pen=None)
+                sp_l = pg.ScatterPlotItem(x=d_pts, y=all_l, symbol=simbolo, size=7, brush=brush_scatter, pen=None)
+                sp_t.rec_data = r
+                sp_a.rec_data = r
+                sp_l.rec_data = r
+                self.plot_coil_tau_liftoff.addItem(sp_t)
+                self.plot_coil_auc_liftoff.addItem(sp_a)
+                self.plot_coil_l_liftoff.addItem(sp_l)
 
             # 2.2 Plotar a linha média conectando as distâncias da série
             self.plot_coil_tau_liftoff.plot(dists, taus, pen=pen_mean, symbol=simbolo, symbolSize=16, symbolBrush=cor_base, symbolPen=symbol_pen, name=label)
             self.plot_coil_auc_liftoff.plot(dists, aucs, pen=pen_mean, symbol=simbolo, symbolSize=16, symbolBrush=cor_base, symbolPen=symbol_pen, name=label)
             self.plot_coil_l_liftoff.plot(dists, l_efetivas, pen=pen_mean, symbol=simbolo, symbolSize=16, symbolBrush=cor_base, symbolPen=symbol_pen, name=label)
-
-            # 2.3 Exibir o ID de cada amostra em preto pequeno centralizado dentro da forma
-            font_id_coil = QtGui.QFont("Segoe UI", 7, QtGui.QFont.Bold)
-            for r in g_recs_sorted:
-                id_txt = str(r.get("id_amostra", ""))
-                d_val = r["distancia_mm"]
-
-                txt_tau = pg.TextItem(text=id_txt, color=(0, 0, 0), anchor=(0.5, 0.5))
-                txt_tau.setFont(font_id_coil)
-                txt_tau.setPos(d_val, r["tau"])
-                self.plot_coil_tau_liftoff.addItem(txt_tau)
-
-                txt_auc = pg.TextItem(text=id_txt, color=(0, 0, 0), anchor=(0.5, 0.5))
-                txt_auc.setFont(font_id_coil)
-                txt_auc.setPos(d_val, r["auc"])
-                self.plot_coil_auc_liftoff.addItem(txt_auc)
-
-                txt_l = pg.TextItem(text=id_txt, color=(0, 0, 0), anchor=(0.5, 0.5))
-                txt_l.setFont(font_id_coil)
-                txt_l.setPos(d_val, r["l_efetiva_uh"])
-                self.plot_coil_l_liftoff.addItem(txt_l)
 
             # Gera dados para o console de relatório
             relatorio_txt.append(f"\n>>> SERIE: Bobina {key[0]} | Material: {key[1]} | Classe: {key[2]}")
@@ -5048,20 +6021,24 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
             # Plot 1: Osciloscópio Live
             pen_live = pg.mkPen(color='#00e676', width=2.0)
-            self.plot_coil_rt_live.plot(t, v, pen=pen_live, name="Sinal Medido (Live)")
+            c1 = self.plot_coil_rt_live.plot(t, v, pen=pen_live, name="Sinal Medido (Live)")
+            c1.curve_title = "Sinal Medido em Tempo Real (Osciloscópio Live)"
 
             # Plot 2: Sobreposição Live vs Curva de Referência do Sensor Ativo
-            self.plot_coil_rt_overlay.plot(t, v, pen=pen_live, name="Live")
+            c2 = self.plot_coil_rt_overlay.plot(t, v, pen=pen_live, name="Live")
+            c2.curve_title = "Sinal Medido Live"
 
             # Busca curva de referência da bobina ativa se houver registros carregados
             active_info = getattr(self, 'active_coil_info', {})
             active_id = active_info.get("id", "681")
             
             ref_curve = None
+            ref_rec = None
             if hasattr(self, 'loaded_coil_records') and self.loaded_coil_records:
                 matches = [r for r in self.loaded_coil_records if str(r.get("id_bobina", "")) == str(active_id)]
                 if matches:
-                    ref_curve = matches[0].get("curva", None)
+                    ref_rec = matches[0]
+                    ref_curve = ref_rec.get("curva", None)
 
             if ref_curve is not None:
                 n_pts = min(len(v), len(ref_curve))
@@ -5069,13 +6046,19 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 v_live_sub = v[:n_pts]
                 v_ref_sub = np.array(ref_curve[:n_pts])
 
-                pen_ref = pg.mkPen(color='#29b6f6', width=2.0, style=QtCore.Qt.DashLine)
-                self.plot_coil_rt_overlay.plot(t_sub, v_ref_sub, pen=pen_ref, name=f"Ref. B.{active_id}")
+                mat_ref = ref_rec.get("material", "A36 Comum") if ref_rec else self.obter_material_selecionado()
+                estilo_ref = obter_estilo_material(mat_ref)
+                pen_ref = pg.mkPen(color='#29b6f6', width=2.0, style=estilo_ref)
+                c3 = self.plot_coil_rt_overlay.plot(t_sub, v_ref_sub, pen=pen_ref, name=f"Ref. B.{active_id}")
+                c3.curve_title = f"Curva de Referência do Sensor B.{active_id}"
+                if ref_rec:
+                    c3.rec_data = ref_rec
 
                 # Plot 3: Sinal Residual Delta V(t)
                 delta_v = v_live_sub - v_ref_sub
                 pen_res = pg.mkPen(color='#f1c40f', width=1.5)
-                self.plot_coil_rt_residual.plot(t_sub, delta_v, pen=pen_res, name="Delta V(t)")
+                c4 = self.plot_coil_rt_residual.plot(t_sub, delta_v, pen=pen_res, name="Delta V(t)")
+                c4.curve_title = "Sinal Residual Delta V(t) [Medido - Referência]"
                 
                 rms_err = float(np.sqrt(np.mean(delta_v**2)))
                 status_txt = "<b style='color:#00e676;'>ESTÁVEL (Conforme Ref.)</b>" if rms_err < 150 else "<b style='color:#e74c3c;'>ATENÇÃO: Desvio Térmico / Alinhamento</b>"
@@ -5098,6 +6081,64 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 "<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
                 "<i>Aguardando início de aquisição serial em tempo real...</i>"
             )
+
+    def ao_mover_mouse_grafico_rt_caracterizacao(self, pos):
+        if not self.is_tooltip_enabled():
+            return
+        if not hasattr(self, 'win_coil_rt_plots'):
+            return
+
+        plots = [
+            self.plot_coil_rt_live,
+            self.plot_coil_rt_overlay,
+            self.plot_coil_rt_residual
+        ]
+
+        melhor_item = None
+        hover_coords = None
+        hover_pt = None
+        menor_dist_px = float('inf')
+        target_plot = None
+
+        for plot_item in plots:
+            vb = plot_item.vb
+            if vb.sceneBoundingRect().contains(pos):
+                mouse_pt = vb.mapSceneToView(pos)
+                for item in plot_item.items:
+                    if isinstance(item, pg.PlotDataItem) and item.xData is not None and item.yData is not None:
+                        dist_px, pt_coord = self.calcular_distancia_pixel_curva(vb, item, pos)
+                        if dist_px < 25.0 and dist_px < menor_dist_px:
+                            menor_dist_px = dist_px
+                            melhor_item = item
+                            hover_coords = (item.xData, item.yData)
+                            hover_pt = pt_coord
+                            target_plot = plot_item
+                break
+
+        if melhor_item and target_plot:
+            self.atualizar_destaque_visual_hover(target_plot=target_plot, line_coords=hover_coords)
+            title = getattr(melhor_item, 'curve_title', melhor_item.name or "Sinal em Tempo Real")
+            mat_sel = self.obter_material_selecionado()
+            cls_sel = self.obter_classe_selecionada()
+            active_info = getattr(self, 'active_coil_info', {})
+            active_id = active_info.get("id", "681")
+
+            rec_ref = getattr(melhor_item, 'rec_data', None)
+            filename_ref = rec_ref.get("filename", "Sinal Live USB/COM") if rec_ref else "Sinal Live USB/COM"
+            mat_ref = rec_ref.get("material", mat_sel) if rec_ref else mat_sel
+            cls_ref = rec_ref.get("classe", cls_sel) if rec_ref else cls_sel
+
+            tooltip_text = (
+                f"📈 <b>{title}</b><br>"
+                f"📁 <b>Referência de Arquivo:</b> {filename_ref}<br>"
+                f"🛡️ <b>Material:</b> {mat_ref}<br>"
+                f"📊 <b>Estado / Classe de Corrosão:</b> {cls_ref.capitalize()}<br>"
+                f"🧲 <b>Bobina Ativa:</b> ID {active_id}<br>"
+                f"⏱️ <b>Ponto Cursor:</b> t = {hover_pt[0]:.1f} &mu;s | Amplitude V(t) = {hover_pt[1]:.1f} counts"
+            )
+            self.floating_tooltip.exibir_hover(QtGui.QCursor.pos(), tooltip_text, target_plot=target_plot)
+        else:
+            self.atualizar_destaque_visual_hover(target_plot=None)
 
     def atualizar_graficos_estatistica_caracterizacao(self):
         if not hasattr(self, 'plot_coil_st_decay'):
@@ -5150,6 +6191,54 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     "dt_us": r.get("dt_us", 0.1)
                 })
 
+        # Aplica Filtros de Exibição (Materiais e Classes)
+        if hasattr(self, 'coil_filter_checkboxes_material'):
+            mats_ok = [m for m, chk in self.coil_filter_checkboxes_material.items() if chk.isChecked()]
+            cls_map = {
+                "Saudável": getattr(self, 'chk_coil_filter_saudavel', None),
+                "Leve": getattr(self, 'chk_coil_filter_leve', None),
+                "Moderada": getattr(self, 'chk_coil_filter_moderada', None),
+                "Avançada": getattr(self, 'chk_coil_filter_avancada', None),
+                "Corroído": getattr(self, 'chk_coil_filter_corroido', None),
+                "Ar Livre": getattr(self, 'chk_coil_filter_ar_cls', None)
+            }
+            cls_ok = [c for c, chk in cls_map.items() if chk is None or chk.isChecked()]
+
+            self.records_estatistica_caracterizacao = [
+                a for a in self.records_estatistica_caracterizacao
+                if a["material"] in mats_ok and a["classe"] in cls_ok
+            ]
+
+        # Aplica Filtro de Outliers (IQR) por arquivo / ensaio individual se selecionado
+        if hasattr(self, 'chk_coil_filter_outliers') and self.chk_coil_filter_outliers.isChecked() and self.records_estatistica_caracterizacao:
+            # Agrupa individualmente por ensaio (id_bobina, material, classe, distancia_mm)
+            grupos_file = {}
+            for a in self.records_estatistica_caracterizacao:
+                file_key = (a.get("id_bobina"), a.get("material"), a.get("classe"), a.get("distancia_mm"))
+                if file_key not in grupos_file:
+                    grupos_file[file_key] = []
+                grupos_file[file_key].append(a)
+
+            records_limpos = []
+            for file_key, grupo in grupos_file.items():
+                if len(grupo) >= 4:
+                    taus_g = [item["tau"] for item in grupo]
+                    aucs_g = [item["auc"] for item in grupo]
+                    q25_t, q75_t = np.percentile(taus_g, [25, 75])
+                    iqr_t = q75_t - q25_t
+                    q25_a, q75_a = np.percentile(aucs_g, [25, 75])
+                    iqr_a = q75_a - q25_a
+
+                    for item in grupo:
+                        is_ok_t = (q25_t - 1.5 * iqr_t <= item["tau"] <= q75_t + 1.5 * iqr_t)
+                        is_ok_a = (q25_a - 1.5 * iqr_a <= item["auc"] <= q75_a + 1.5 * iqr_a)
+                        if is_ok_t and is_ok_a:
+                            records_limpos.append(item)
+                else:
+                    records_limpos.extend(grupo)
+
+            self.records_estatistica_caracterizacao = records_limpos
+
         # Mapeia tonalidade por ID e aplica cores/símbolos padronizados por Material e Classe
         if self.records_estatistica_caracterizacao:
             ids_unicos = sorted(list(set([str(a["id"]) for a in self.records_estatistica_caracterizacao])))
@@ -5172,23 +6261,47 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     a_item["color_hex"] = cor_base
                     a_item["brush"] = pg.mkBrush(base_qcol)
 
-        # Plot 1: Envoltória Média
+        # Plot 1: Curvas Transientes de Decaimento com Estilo por Material e Tonalidade HSL
         for idx, r in enumerate(recs):
-            cor = obter_cor_classe(r.get("classe", "Saudável"))
-            t_us = np.arange(len(r["curva"])) * r.get("dt_us", 0.1)
-            self.plot_coil_st_decay.plot(t_us, r["curva"], pen=pg.mkPen(color=cor, width=2.0), name=f"B.{r.get('id_bobina','')} ({r.get('distancia_mm',0)}mm, {r.get('material','')})")
+            cor_base_hex = obter_cor_classe(r.get("classe", "Saudável"))
+            if use_id_shading and recs:
+                base_qcol = QtGui.QColor(cor_base_hex)
+                h, s, l_val, a_alpha = base_qcol.getHslF()
+                target_l = id_to_lightness.get(str(r.get("id_amostra", r.get("filename", ""))), 0.55) if 'id_to_lightness' in locals() else 0.55
+                cor_hex = QtGui.QColor.fromHslF(h, min(1.0, s * 1.05), max(0.25, min(0.90, target_l))).name()
+            else:
+                cor_hex = cor_base_hex
 
-        # Plot 2, 3, 4: Tau, AUC e Scatter usando símbolos por material e pincéis por classe/tonalidade
+            estilo = obter_estilo_material(r.get("material", "A36 Comum"))
+            t_us = np.arange(len(r["curva"])) * r.get("dt_us", 0.1)
+            pen = pg.mkPen(color=cor_hex, width=2.2, style=estilo)
+            curve_st = self.plot_coil_st_decay.plot(
+                t_us, r["curva"], pen=pen,
+                name=f"B.{r.get('id_bobina','')} ({r.get('distancia_mm',0)}mm, {r.get('material','')})"
+            )
+            curve_st.rec_data = r
+
+        # Plot 2, 3, 4: Tau, AUC e Scatter agrupados por (símbolo, tonalidade) em lote (Vetorização - 1000x mais rápido)
+        grupos_scatter = {}
         for a in self.records_estatistica_caracterizacao:
             d_val = a["distancia_mm"]
             t_val = a["tau"]
             a_val = a["auc"]
             simb = a.get("symbol", "o")
-            brush_pt = a.get("brush", pg.mkBrush("#3498db"))
+            color_hex = a.get("color_hex", "#3498db")
 
-            self.plot_coil_st_tau.plot([d_val], [t_val], pen=None, symbol=simb, symbolSize=9, symbolBrush=brush_pt, symbolPen=pg.mkPen('w', width=0.4))
-            self.plot_coil_st_auc.plot([d_val], [a_val], pen=None, symbol=simb, symbolSize=9, symbolBrush=brush_pt, symbolPen=pg.mkPen('w', width=0.4))
-            self.plot_coil_st_scatter.plot([t_val], [a_val], pen=None, symbol=simb, symbolSize=10, symbolBrush=brush_pt, symbolPen=pg.mkPen('w', width=0.4))
+            grp_key = (simb, color_hex)
+            if grp_key not in grupos_scatter:
+                grupos_scatter[grp_key] = {"d": [], "t": [], "a": [], "brush": a.get("brush", pg.mkBrush(color_hex))}
+            grupos_scatter[grp_key]["d"].append(d_val)
+            grupos_scatter[grp_key]["t"].append(t_val)
+            grupos_scatter[grp_key]["a"].append(a_val)
+
+        for (simb, _), data in grupos_scatter.items():
+            b_pt = data["brush"]
+            self.plot_coil_st_tau.addItem(pg.ScatterPlotItem(x=data["d"], y=data["t"], symbol=simb, size=8, brush=b_pt, pen=pg.mkPen('w', width=0.3)))
+            self.plot_coil_st_auc.addItem(pg.ScatterPlotItem(x=data["d"], y=data["a"], symbol=simb, size=8, brush=b_pt, pen=pg.mkPen('w', width=0.3)))
+            self.plot_coil_st_scatter.addItem(pg.ScatterPlotItem(x=data["t"], y=data["a"], symbol=simb, size=9, brush=b_pt, pen=pg.mkPen('w', width=0.3)))
 
         taus = [a["tau"] for a in self.records_estatistica_caracterizacao]
         aucs = [a["auc"] for a in self.records_estatistica_caracterizacao]
@@ -5208,12 +6321,297 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.txt_coil_st_report.setHtml("".join(report))
 
     def ao_mover_mouse_grafico_estatistico_caracterizacao(self, pos):
-        pass
+        if not self.is_tooltip_enabled():
+            return
+        if not hasattr(self, 'records_estatistica_caracterizacao') or not self.records_estatistica_caracterizacao:
+            return
+
+        plots = [
+            self.plot_coil_st_decay,
+            self.plot_coil_st_tau,
+            self.plot_coil_st_auc,
+            self.plot_coil_st_scatter
+        ]
+
+        melhor_item = None
+        melhor_plot = None
+        melhor_pt_x, melhor_pt_y = None, None
+        hover_decay_pt = None
+        hover_decay_coords = None
+        menor_dist_px = float('inf')
+
+        for plot_item in plots:
+            vb = plot_item.vb
+            if vb.sceneBoundingRect().contains(pos):
+                if plot_item == self.plot_coil_st_decay:
+                    for item in plot_item.items:
+                        if isinstance(item, pg.PlotDataItem) and hasattr(item, 'rec_data'):
+                            r = item.rec_data
+                            dist_px, pt_coord = self.calcular_distancia_pixel_curva(vb, item, pos)
+                            if dist_px < 25.0 and dist_px < menor_dist_px:
+                                menor_dist_px = dist_px
+                                melhor_item = r
+                                hover_decay_pt = pt_coord
+                                hover_decay_coords = (item.xData, item.yData)
+                else:
+                    for item in self.records_estatistica_caracterizacao:
+                        d_val = item["distancia_mm"]
+                        tau_val = item["tau"]
+                        auc_val = item["auc"]
+
+                        if plot_item == self.plot_coil_st_tau:
+                            pt_x, pt_y = d_val, tau_val
+                        elif plot_item == self.plot_coil_st_auc:
+                            pt_x, pt_y = d_val, auc_val
+                        elif plot_item == self.plot_coil_st_scatter:
+                            pt_x, pt_y = tau_val, auc_val
+                        else:
+                            continue
+
+                        pt_pixel = vb.mapViewToScene(pg.Point(pt_x, pt_y))
+                        dist_px = np.hypot(pos.x() - pt_pixel.x(), pos.y() - pt_pixel.y())
+
+                        if dist_px < 22.0 and dist_px < menor_dist_px:
+                            menor_dist_px = dist_px
+                            melhor_item = item
+                            melhor_plot = plot_item
+                            melhor_pt_x, melhor_pt_y = pt_x, pt_y
+                break
+
+        if melhor_item:
+            if hover_decay_coords is not None:
+                self.atualizar_destaque_visual_hover(target_plot=self.plot_coil_st_decay, line_coords=hover_decay_coords)
+            elif melhor_plot is not None and melhor_pt_x is not None:
+                simb = obter_simbolo_material(melhor_item.get("material"))
+                self.atualizar_destaque_visual_hover(target_plot=melhor_plot, pt_coords=(melhor_pt_x, melhor_pt_y), symbol=simb)
+
+            n_tot = melhor_item.get("num_samples", 1)
+            manual_adj = "Sim" if melhor_item.get("ajuste_manual_liftoff", False) else "Não"
+            local_str = melhor_item.get("local", "Não Especificado")
+            ind_uh = melhor_item.get("indutancia_uh", 0.0)
+
+            estilo_nome = {
+                "A36 Comum": "Contínua (Solid)",
+                "A36 GE": "Tracejada (Dash)",
+                "A36 GF": "Pontilhada (Dot)",
+                "Estrutura Torre": "Traço-Ponto (DashDot)",
+                "Ar Livre": "Contínua (Solid)"
+            }.get(melhor_item.get("material"), "Padrão")
+
+            cursor_info = ""
+            if hover_decay_pt is not None:
+                cursor_info = f"⏱️ <b>Ponto Cursor:</b> t = {hover_decay_pt[0]:.2f} &mu;s | V(t) = {hover_decay_pt[1]:.1f} ADC Counts<br>"
+
+            header_title = "📈 <b>CURVA MÉDIA DE DECAIMENTO DA CARACTERIZAÇÃO V(t)</b>" if hover_decay_pt is not None else "📍 <b>PONTO DE CARACTERIZAÇÃO ESTATÍSTICA</b>"
+
+            tooltip_text = (
+                f"{header_title}<br>"
+                f"--------------------------------------------------<br>"
+                f"📁 <b>Referência de Arquivo:</b> {melhor_item.get('filename', 'Ensaio Média')}<br>"
+                f"🛡️ <b>Material:</b> {melhor_item['material']} <i>[{estilo_nome}]</i><br>"
+                f"📊 <b>Estado / Classe de Corrosão:</b> {melhor_item['classe'].capitalize()}<br>"
+                f"🆔 <b>Amostra (ID):</b> {melhor_item.get('id', melhor_item.get('id_amostra', 'N/A'))}<br>"
+                f"📍 <b>Local de Coleta:</b> {local_str}<br>"
+                f"🧲 <b>Sensor / Bobina:</b> ID {melhor_item['id_bobina']} (L<sub>nom</sub> = {ind_uh:.1f} &mu;H)<br>"
+                f"📏 <b>Afastamento (Lift-Off):</b> {melhor_item['distancia_mm']:.2f} mm<br>"
+                f"--------------------------------------------------<br>"
+                f"{cursor_info}"
+                f"⚡ <b>Constante de Tempo (&tau;):</b> {melhor_item['tau']:.4f} &mu;s<br>"
+                f"📐 <b>Área Sob a Curva (AUC):</b> {melhor_item['auc']:.1f} Counts.&mu;s<br>"
+                f"🧲 <b>Indutância Efetiva (L<sub>ef</sub>):</b> {melhor_item.get('l_efetiva_uh', 0.0):.2f} &mu;H<br>"
+                f"🔧 <b>Ajuste Manual Lift-Off:</b> {manual_adj}<br>"
+                f"📊 <b>Amostragens no Lote:</b> N = {n_tot}"
+            )
+            target_p = self.plot_coil_st_decay if hover_decay_coords is not None else melhor_plot
+            self.floating_tooltip.exibir_hover(QtGui.QCursor.pos(), tooltip_text, target_plot=target_p)
+        else:
+            self.atualizar_destaque_visual_hover(target_plot=None)
 
     def ao_validar_limite_id_amostra(self, text):
         if len(text) >= 3:
             pos = self.edit_coil_sample_id.mapToGlobal(QtCore.QPoint(0, self.edit_coil_sample_id.height()))
             QtWidgets.QToolTip.showText(pos, "⚠️ Limite atingido: O ID da amostra possui no máximo 3 caracteres (ex: 001, 012).", self.edit_coil_sample_id)
+
+
+# =====================================================================
+# JANELA DE LAUNCHER / MENU PRINCIPAL DE MÓDULOS
+# =====================================================================
+class ModuleLauncherWindow(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Sistema de Ensaio por Correntes Parasitas — Menu Principal")
+        self.resize(1020, 640)
+        self.setMinimumSize(900, 580)
+        self.center_on_screen()
+        
+        self.ai_window = None
+        self.coil_window = None
+        
+        self.init_ui()
+
+    def center_on_screen(self):
+        screen = QtWidgets.QApplication.primaryScreen().geometry()
+        size = self.geometry()
+        self.move((screen.width() - size.width()) // 2, (screen.height() - size.height()) // 2)
+
+    def init_ui(self):
+        central_widget = QtWidgets.QWidget()
+        central_widget.setStyleSheet("background-color: #121214;")
+        self.setCentralWidget(central_widget)
+        
+        main_layout = QtWidgets.QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(35, 35, 35, 35)
+        main_layout.setSpacing(22)
+
+        # Cabeçalho Principal
+        header_layout = QtWidgets.QVBoxLayout()
+        header_layout.setSpacing(6)
+        
+        lbl_title = QtWidgets.QLabel("SISTEMA DE ENSAIO E DIAGNÓSTICO POR CORRENTES PARASITAS")
+        lbl_title.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_title.setStyleSheet("font-size: 17pt; font-weight: bold; color: #00e676; font-family: 'Segoe UI', Arial;")
+        
+        lbl_subtitle = QtWidgets.QLabel("Selecione o módulo operacional desejado para iniciar:")
+        lbl_subtitle.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_subtitle.setStyleSheet("font-size: 11pt; color: #a0a0a0;")
+        
+        header_layout.addWidget(lbl_title)
+        header_layout.addWidget(lbl_subtitle)
+        main_layout.addLayout(header_layout)
+
+        # Container dos dois Cards de Módulos
+        cards_layout = QtWidgets.QHBoxLayout()
+        cards_layout.setSpacing(25)
+
+        # ---------------------------------------------------------------------
+        # CARD 1: MÓDULO DE AQUISIÇÃO & DIAGNÓSTICO IA
+        # ---------------------------------------------------------------------
+        card1 = QtWidgets.QGroupBox()
+        card1.setStyleSheet("""
+            QGroupBox {
+                background-color: #1c1c1e;
+                border: 2px solid #27ae60;
+                border-radius: 10px;
+                padding: 16px;
+            }
+            QGroupBox:hover {
+                border: 2px solid #2ecc71;
+                background-color: #222226;
+            }
+        """)
+        card1_layout = QtWidgets.QVBoxLayout(card1)
+        card1_layout.setSpacing(12)
+
+        lbl_icon1 = QtWidgets.QLabel("🔬")
+        lbl_icon1.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_icon1.setStyleSheet("font-size: 38pt;")
+        card1_layout.addWidget(lbl_icon1)
+
+        lbl_card1_title = QtWidgets.QLabel("Módulo 1: Aquisição & Diagnóstico IA")
+        lbl_card1_title.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_card1_title.setStyleSheet("font-size: 13pt; font-weight: bold; color: #2ecc71;")
+        card1_layout.addWidget(lbl_card1_title)
+
+        lbl_card1_desc = QtWidgets.QLabel(
+            "• Leitura em tempo real via porta serial/USB (COM)\n"
+            "• Classificação inteligente via Machine Learning (Random Forest/SVM)\n"
+            "• Análise estatística offline de cupons de calibração\n"
+            "• Diagnóstico físico e temporal instantâneo"
+        )
+        lbl_card1_desc.setWordWrap(True)
+        lbl_card1_desc.setStyleSheet("font-size: 9.5pt; color: #d0d0d0; line-height: 1.4;")
+        card1_layout.addWidget(lbl_card1_desc)
+        card1_layout.addStretch()
+
+        btn_open_m1 = QtWidgets.QPushButton("▶ Acessar Módulo 1 (Aquisição & IA)")
+        btn_open_m1.setMinimumHeight(48)
+        btn_open_m1.setCursor(QtCore.Qt.PointingHandCursor)
+        btn_open_m1.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60; color: white; font-weight: bold; font-size: 10.5pt; border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #2ecc71;
+            }
+        """)
+        btn_open_m1.clicked.connect(self.abrir_modulo_ai)
+        card1_layout.addWidget(btn_open_m1)
+        cards_layout.addWidget(card1, 1)
+
+        # ---------------------------------------------------------------------
+        # CARD 2: MÓDULO DE CARACTERIZAÇÃO & COMPARAÇÃO DE BOBINAS
+        # ---------------------------------------------------------------------
+        card2 = QtWidgets.QGroupBox()
+        card2.setStyleSheet("""
+            QGroupBox {
+                background-color: #1c1c1e;
+                border: 2px solid #8e44ad;
+                border-radius: 10px;
+                padding: 16px;
+            }
+            QGroupBox:hover {
+                border: 2px solid #9b59b6;
+                background-color: #222226;
+            }
+        """)
+        card2_layout = QtWidgets.QVBoxLayout(card2)
+        card2_layout.setSpacing(12)
+
+        lbl_icon2 = QtWidgets.QLabel("🧲")
+        lbl_icon2.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_icon2.setStyleSheet("font-size: 38pt;")
+        card2_layout.addWidget(lbl_icon2)
+
+        lbl_card2_title = QtWidgets.QLabel("Módulo 2: Caracterização de Bobinas")
+        lbl_card2_title.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_card2_title.setStyleSheet("font-size: 13pt; font-weight: bold; color: #ab47bc;")
+        card2_layout.addWidget(lbl_card2_title)
+
+        lbl_card2_desc = QtWidgets.QLabel(
+            "• Ensaio de bancada de Lift-Off e indutância L (\u03bcH)\n"
+            "• Grade 4-colunas de espaçadores (5mm, 4mm, 2mm, 1mm com 1x/2x)\n"
+            "• 3 Sub-Abas: 📈 Comparativos, ⚡ Tempo Real e 📊 Estatística\n"
+            "• Visualizador 3D interativo e gerador de relatórios"
+        )
+        lbl_card2_desc.setWordWrap(True)
+        lbl_card2_desc.setStyleSheet("font-size: 9.5pt; color: #d0d0d0; line-height: 1.4;")
+        card2_layout.addWidget(lbl_card2_desc)
+        card2_layout.addStretch()
+
+        btn_open_m2 = QtWidgets.QPushButton("▶ Acessar Módulo 2 (Caracterização de Bobinas)")
+        btn_open_m2.setMinimumHeight(48)
+        btn_open_m2.setCursor(QtCore.Qt.PointingHandCursor)
+        btn_open_m2.setStyleSheet("""
+            QPushButton {
+                background-color: #8e44ad; color: white; font-weight: bold; font-size: 10.5pt; border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #9b59b6;
+            }
+        """)
+        btn_open_m2.clicked.connect(self.abrir_modulo_bobinas)
+        card2_layout.addWidget(btn_open_m2)
+        cards_layout.addWidget(card2, 1)
+
+        main_layout.addLayout(cards_layout, 1)
+
+        # Rodapé
+        lbl_footer = QtWidgets.QLabel("SENAI / ISI — Anticorrosão & Ensaios Não Destrutivos (END)")
+        lbl_footer.setAlignment(QtCore.Qt.AlignCenter)
+        lbl_footer.setStyleSheet("font-size: 8.5pt; color: #666666;")
+        main_layout.addWidget(lbl_footer)
+
+    def abrir_modulo_ai(self):
+        if self.ai_window is None:
+            self.ai_window = EddyCurrentPlotter(mode="ai", launcher=self)
+        self.ai_window.showMaximized()
+        self.hide()
+
+    def abrir_modulo_bobinas(self):
+        if self.coil_window is None:
+            self.coil_window = EddyCurrentPlotter(mode="coil", launcher=self)
+        self.coil_window.showMaximized()
+        self.hide()
 
 
 # =====================================================================
@@ -5254,6 +6652,6 @@ if __name__ == "__main__":
         }
     """)
 
-    plotter = EddyCurrentPlotter()
-    plotter.show()
+    launcher = ModuleLauncherWindow()
+    launcher.show()
     sys.exit(app.exec_())
