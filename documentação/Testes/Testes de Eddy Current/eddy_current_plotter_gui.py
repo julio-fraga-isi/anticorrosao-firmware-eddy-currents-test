@@ -3522,8 +3522,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Atualiza a legenda do eixo inferior com a unidade escalada correspondente
         khz = 1000.0 / self.dt_us if self.dt_us > 0 else 0.0
         modo_nome = "ETS" if not self.chk_auto_trigger.isChecked() else "DMA"
-        self.plot_decay.setLabel('bottom', f'Tempo (Modo {modo_nome} - {khz:.2f} kHz)', unid_t)
-        
+        # Atualiza os gráficos da Sub-Aba 2 do Módulo 2 (Monitoramento em Tempo Real) se estiver ativa
+        if hasattr(self, 'tab_sub_caracterizacao') and self.tab_sub_caracterizacao.currentIndex() == 1:
+            self.atualizar_graficos_tempo_real_caracterizacao()
+
         # 6.5. Atualiza os gráficos da Aba 4 (Diagnóstico em Tempo Real) se estiver ativa
         if self.tab_widget.currentIndex() == 3:
             self.lbl_diag_material.setText(f"Material: {material_detectado}")
@@ -6015,14 +6017,28 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.plot_coil_rt_residual.clear()
 
         # Plota os dados em tempo real coletados na aba principal (se existirem)
+        t = None
+        v = None
+        is_live_stream = False
+
         if hasattr(self, 'tempo_us') and hasattr(self, 'tensao_mv') and len(self.tempo_us) > 0:
             t = np.array(self.tempo_us)
             v = np.array(self.tensao_mv)
+            is_live_stream = True
+        elif hasattr(self, 'loaded_coil_records') and self.loaded_coil_records:
+            rec_fall = self.loaded_coil_records[0]
+            curva_raw = rec_fall.get("curva", [])
+            dt_raw = rec_fall.get("dt_us", getattr(self, 'dt_us', 0.1))
+            if len(curva_raw) > 0:
+                t = np.arange(len(curva_raw)) * dt_raw
+                v = np.array(curva_raw)
 
+        if t is not None and v is not None and len(t) > 0:
             # Plot 1: Osciloscópio Live
             pen_live = pg.mkPen(color='#00e676', width=2.0)
-            c1 = self.plot_coil_rt_live.plot(t, v, pen=pen_live, name="Sinal Medido (Live)")
-            c1.curve_title = "Sinal Medido em Tempo Real (Osciloscópio Live)"
+            title_live = "Sinal Medido em Tempo Real (Osciloscópio Live)" if is_live_stream else "Sinal de Ensaio Carregado (Simulação Live)"
+            c1 = self.plot_coil_rt_live.plot(t, v, pen=pen_live, name=title_live)
+            c1.curve_title = title_live
 
             # Plot 2: Sobreposição Live vs Curva de Referência do Sensor Ativo
             c2 = self.plot_coil_rt_overlay.plot(t, v, pen=pen_live, name="Live")
@@ -6038,6 +6054,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 matches = [r for r in self.loaded_coil_records if str(r.get("id_bobina", "")) == str(active_id)]
                 if matches:
                     ref_rec = matches[0]
+                    ref_curve = ref_rec.get("curva", None)
+                else:
+                    ref_rec = self.loaded_coil_records[0]
                     ref_curve = ref_rec.get("curva", None)
 
             if ref_curve is not None:
@@ -6062,10 +6081,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 
                 rms_err = float(np.sqrt(np.mean(delta_v**2)))
                 status_txt = "<b style='color:#00e676;'>ESTÁVEL (Conforme Ref.)</b>" if rms_err < 150 else "<b style='color:#e74c3c;'>ATENÇÃO: Desvio Térmico / Alinhamento</b>"
+                fonte_txt = "Transmissão Serial USB/COM Ativa em Tempo Real" if is_live_stream else "Sinal de Ensaio CSV Carregado (Modo Offline / Demonstração)"
 
                 self.txt_coil_rt_report.setHtml(
                     f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
                     f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')})<br>"
+                    f"<b>Fonte do Sinal:</b> {fonte_txt}<br>"
                     f"<b>Desvio Médio RMS (Resíduo):</b> {rms_err:.2f} ADC Counts<br>"
                     f"<b>Status de Estabilidade:</b> {status_txt}<br>"
                     f"<small style='color:#a0a0a0;'>Gráficos atualizados continuamente via interface de aquisição USB/COM.</small>"
@@ -6079,7 +6100,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         else:
             self.txt_coil_rt_report.setHtml(
                 "<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
-                "<i>Aguardando início de aquisição serial em tempo real...</i>"
+                "<i>Aguardando início de aquisição serial em tempo real...</i><br><br>"
+                "<b>Como fazer para o monitoramento em tempo real funcionar:</b><br>"
+                "1. 🔌 <b>Com Hardware Conectado:</b> Selecione a Porta COM Serial no menu principal, clique em <b>'Conectar Serial'</b> e marque <b>'Modo Contínuo (Auto-Trigger)'</b> ou clique em <b>'Ler Transiente'</b>.<br>"
+                "2. 📁 <b>Sem Hardware (Offline):</b> Clique em <b>'Importar Testes CSV'</b> no painel lateral à esquerda para carregar curvas gravadas."
             )
 
     def ao_mover_mouse_grafico_rt_caracterizacao(self, pos):
