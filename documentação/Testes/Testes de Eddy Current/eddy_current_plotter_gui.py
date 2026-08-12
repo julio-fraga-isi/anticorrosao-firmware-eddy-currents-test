@@ -526,9 +526,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         outer_layout.setSpacing(6)
 
         # Adiciona a Barra Superior de Navegação se o Módulo foi aberto via Launcher
+        self.top_nav_bar = None
         if self.launcher is not None or self.mode in ["ai", "coil"]:
-            top_nav_bar = QtWidgets.QHBoxLayout()
-            top_nav_bar.setContentsMargins(4, 2, 4, 4)
+            self.top_nav_bar = QtWidgets.QHBoxLayout()
+            self.top_nav_bar.setContentsMargins(4, 2, 4, 4)
             
             btn_back = QtWidgets.QPushButton("⬅️ Voltar ao Menu Principal")
             btn_back.setMinimumHeight(32)
@@ -543,22 +544,25 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 }
             """)
             btn_back.clicked.connect(self.voltar_ao_menu_principal)
-            top_nav_bar.addWidget(btn_back)
+            self.top_nav_bar.addWidget(btn_back)
 
             if self.mode == "ai":
-                lbl_mod_name = QtWidgets.QLabel("🔬 <b>MÓDULO 1: Aquisição & Diagnóstico IA</b>")
+                lbl_mod_name = QtWidgets.QLabel("<b>MÓDULO 1: Aquisição & Diagnóstico IA</b>")
             elif self.mode == "coil":
-                lbl_mod_name = QtWidgets.QLabel("🧲 <b>MÓDULO 2: Caracterização & Comparação de Bobinas</b>")
+                lbl_mod_name = QtWidgets.QLabel("<b>MÓDULO 2: Caracterização & Comparação de Bobinas</b>")
             else:
-                lbl_mod_name = QtWidgets.QLabel("⚡ <b>SISTEMA DE ENSAIO EDDY CURRENT</b>")
+                lbl_mod_name = QtWidgets.QLabel("<b>SISTEMA DE ENSAIO EDDY CURRENT</b>")
 
             lbl_mod_name.setStyleSheet("font-size: 11pt; color: #ffffff; margin-left: 10px;")
-            top_nav_bar.addWidget(lbl_mod_name)
-            top_nav_bar.addStretch()
+            self.top_nav_bar.addWidget(lbl_mod_name)
+            self.top_nav_bar.addStretch()
 
-            outer_layout.addLayout(top_nav_bar)
+            outer_layout.addLayout(self.top_nav_bar)
 
         self.tab_widget = QtWidgets.QTabWidget()
+        self.tab_widget.tabBar().setElideMode(QtCore.Qt.ElideNone)
+        self.tab_widget.tabBar().setUsesScrollButtons(True)
+        self.tab_widget.tabBar().setExpanding(False)
         self.tab_widget.setStyleSheet("""
             QTabWidget::pane {
                 border: 1px solid #3a3a3c;
@@ -568,12 +572,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             QTabBar::tab {
                 background-color: #1e1e1f;
                 color: #a0a0a0;
-                padding: 8px 16px;
-                margin-right: 2px;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
+                padding: 8px 20px;
+                min-width: 170px;
+                margin-right: 4px;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
                 font-weight: bold;
-                font-size: 9.5pt;
+                font-size: 9pt;
             }
             QTabBar::tab:selected {
                 background-color: #2c2c2e;
@@ -585,7 +590,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 color: #ffffff;
             }
         """)
-        outer_layout.addWidget(self.tab_widget)
+        if self.mode != "coil":
+            outer_layout.addWidget(self.tab_widget)
 
         if self.mode in ["all", "ai"]:
             # Aba 1: Aquisição em Tempo Real
@@ -1227,7 +1233,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.chk_diferenciar_ids_tonalidade.setChecked(False)
             group_filters_layout.addWidget(self.chk_diferenciar_ids_tonalidade, 8, 0, 1, 2)
 
-            self.chk_enable_tooltips = QtWidgets.QCheckBox("👁️ Exibir Tooltips e Destaques Visuais")
+            self.chk_enable_tooltips = QtWidgets.QCheckBox("Exibir Tooltips e Destaques Visuais")
             self.chk_enable_tooltips.setToolTip("Habilita ou desabilita a exibição de destaques visuais e balões de tooltip flutuantes nos gráficos")
             self.chk_enable_tooltips.setChecked(True)
             self.chk_enable_tooltips.stateChanged.connect(self.ao_alternar_exibicao_tooltips)
@@ -1788,13 +1794,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             # ABA 5: Caracterização & Comparação de Bobinas (Lift-Off)
             # =====================================================================
             self.tab_coil_char = QtWidgets.QWidget()
-            self.tab_widget.addTab(self.tab_coil_char, "Caracterização & Comparação de Bobinas")
+            if self.mode != "coil":
+                self.tab_widget.addTab(self.tab_coil_char, "Caracterização & Comparação de Bobinas")
             tab_coil_outer_layout = QtWidgets.QVBoxLayout(self.tab_coil_char)
             tab_coil_outer_layout.setContentsMargins(4, 4, 4, 4)
             tab_coil_outer_layout.setSpacing(4)
     
             # Barra Superior de Controles da Aba 5 (Botão Esconder/Exibir Painel Lateral + Seletor de Colunas)
-            top_bar_tab5 = QtWidgets.QHBoxLayout()
             self.btn_toggle_coil_left = QtWidgets.QPushButton("◀ Esconder Painel Lateral")
             self.btn_toggle_coil_left.setMinimumHeight(28)
             self.btn_toggle_coil_left.setStyleSheet("""
@@ -1806,9 +1812,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 }
             """)
             self.btn_toggle_coil_left.clicked.connect(self.toggle_painel_lateral_caracterizacao)
-            top_bar_tab5.addWidget(self.btn_toggle_coil_left)
-            top_bar_tab5.addSpacing(15)
-    
+
             opcoes_colunas = ["Auto (Dinâmico)", "1 Coluna", "2 Colunas", "3 Colunas", "4 Colunas", "5 Colunas"]
             combo_style = """
                 QComboBox {
@@ -1819,35 +1823,45 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     background-color: #1e1e1f; color: #ffffff; selection-background-color: #00e676; selection-color: #000000;
                 }
             """
-    
-            # 1. Seletor exclusivo para Lista de Sensores / Bobinas
+
             lbl_cols_bobinas = QtWidgets.QLabel("Colunas dos Sensores:")
             lbl_cols_bobinas.setStyleSheet("color: #29b6f6; font-size: 8.5pt; font-weight: bold;")
-            top_bar_tab5.addWidget(lbl_cols_bobinas)
-    
+
             self.combo_num_colunas_bobinas = QtWidgets.QComboBox()
             self.combo_num_colunas_bobinas.addItems(opcoes_colunas)
-            self.combo_num_colunas_bobinas.setCurrentIndex(2)  # Padrão: 2 Colunas (conforme imagem oficial)
+            self.combo_num_colunas_bobinas.setCurrentIndex(2)
             self.combo_num_colunas_bobinas.setStyleSheet(combo_style)
             self.combo_num_colunas_bobinas.currentIndexChanged.connect(self.reorganizar_colunas_seletores_caracterizacao)
-            top_bar_tab5.addWidget(self.combo_num_colunas_bobinas)
-    
-            top_bar_tab5.addSpacing(15)
-    
-            # 2. Seletor para os Demais Seletores (Espaçadores, Cupons, Corrosão, Locais, Amostras)
+
             lbl_cols_painel = QtWidgets.QLabel("Colunas dos Outros Seletores:")
             lbl_cols_painel.setStyleSheet("color: #e1e1e6; font-size: 8.5pt; font-weight: bold;")
-            top_bar_tab5.addWidget(lbl_cols_painel)
-    
+
             self.combo_num_colunas_painel = QtWidgets.QComboBox()
             self.combo_num_colunas_painel.addItems(opcoes_colunas)
-            self.combo_num_colunas_painel.setCurrentIndex(0)  # Padrão: Auto (Dinâmico)
+            self.combo_num_colunas_painel.setCurrentIndex(0)
             self.combo_num_colunas_painel.setStyleSheet(combo_style)
             self.combo_num_colunas_painel.currentIndexChanged.connect(self.reorganizar_colunas_seletores_caracterizacao)
-            top_bar_tab5.addWidget(self.combo_num_colunas_painel)
-    
-            top_bar_tab5.addStretch()
-            tab_coil_outer_layout.addLayout(top_bar_tab5)
+
+            if hasattr(self, 'top_nav_bar') and self.top_nav_bar is not None:
+                self.top_nav_bar.addSpacing(15)
+                self.top_nav_bar.addWidget(self.btn_toggle_coil_left)
+                self.top_nav_bar.addSpacing(10)
+                self.top_nav_bar.addWidget(lbl_cols_bobinas)
+                self.top_nav_bar.addWidget(self.combo_num_colunas_bobinas)
+                self.top_nav_bar.addSpacing(10)
+                self.top_nav_bar.addWidget(lbl_cols_painel)
+                self.top_nav_bar.addWidget(self.combo_num_colunas_painel)
+            else:
+                top_bar_tab5 = QtWidgets.QHBoxLayout()
+                top_bar_tab5.addWidget(self.btn_toggle_coil_left)
+                top_bar_tab5.addSpacing(15)
+                top_bar_tab5.addWidget(lbl_cols_bobinas)
+                top_bar_tab5.addWidget(self.combo_num_colunas_bobinas)
+                top_bar_tab5.addSpacing(15)
+                top_bar_tab5.addWidget(lbl_cols_painel)
+                top_bar_tab5.addWidget(self.combo_num_colunas_painel)
+                top_bar_tab5.addStretch()
+                tab_coil_outer_layout.addLayout(top_bar_tab5)
     
             # Splitter Horizontal para permitir ajustar a largura do menu lateral manualmente
             self.splitter_tab_coil = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
@@ -1949,7 +1963,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             group_coil_select_layout.setSpacing(8)
     
             # Botão para abrir a caixa de diálogo de cadastro/edição
-            self.btn_open_coil_dialog = QtWidgets.QPushButton("⚙️ Cadastrar / Editar Sensores")
+            self.btn_open_coil_dialog = QtWidgets.QPushButton("Cadastrar / Editar Sensores")
             self.btn_open_coil_dialog.setMinimumHeight(35)
             self.btn_open_coil_dialog.setStyleSheet("background-color: #29b6f6; color: #000000; font-weight: bold;")
             self.btn_open_coil_dialog.clicked.connect(self.abrir_dialogo_cadastro_bobina)
@@ -2352,7 +2366,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.btn_clear_coil_comparison.clicked.connect(self.limpar_comparacao_bobinas)
             coil_actions_layout.addWidget(self.btn_clear_coil_comparison)
     
-            self.btn_plot_3d_coils = QtWidgets.QPushButton("📊 Visualizar Gráfico 3D (L x AUC x Distância)")
+            self.btn_plot_3d_coils = QtWidgets.QPushButton("Visualizar Gráfico 3D (L x AUC x Distância)")
             self.btn_plot_3d_coils.setMinimumHeight(40)
             self.btn_plot_3d_coils.setStyleSheet("background-color: #8e44ad; color: white; font-weight: bold; font-size: 10pt;")
             self.btn_plot_3d_coils.clicked.connect(self.abrir_grafico_3d_caracterizacao)
@@ -2458,7 +2472,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.chk_diferenciar_ids_tonalidade.stateChanged.connect(self.atualizar_todos_graficos_caracterizacao)
             group_coil_filters_layout.addWidget(self.chk_diferenciar_ids_tonalidade, max_rows_f + 1, 0, 1, 2)
 
-            self.chk_coil_enable_tooltips = QtWidgets.QCheckBox("👁️ Exibir Tooltips e Destaques Visuais")
+            self.chk_coil_enable_tooltips = QtWidgets.QCheckBox("Exibir Tooltips e Destaques Visuais")
             self.chk_coil_enable_tooltips.setToolTip("Habilita ou desabilita a exibição de destaques visuais e balões de tooltip flutuantes nos gráficos")
             self.chk_coil_enable_tooltips.setChecked(True)
             self.chk_coil_enable_tooltips.stateChanged.connect(self.ao_alternar_exibicao_tooltips)
@@ -2514,6 +2528,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             coil_right_layout.setSpacing(4)
     
             self.tab_sub_caracterizacao = QtWidgets.QTabWidget()
+            self.tab_sub_caracterizacao.tabBar().setElideMode(QtCore.Qt.ElideNone)
+            self.tab_sub_caracterizacao.tabBar().setUsesScrollButtons(True)
+            self.tab_sub_caracterizacao.tabBar().setExpanding(False)
             self.tab_sub_caracterizacao.setStyleSheet("""
                 QTabWidget::pane {
                     border: 1px solid #3a3a3c;
@@ -2523,10 +2540,11 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 QTabBar::tab {
                     background-color: #1e1e1f;
                     color: #a0a0a0;
-                    padding: 6px 14px;
-                    margin-right: 2px;
-                    border-top-left-radius: 4px;
-                    border-top-right-radius: 4px;
+                    padding: 8px 20px;
+                    min-width: 170px;
+                    margin-right: 4px;
+                    border-top-left-radius: 5px;
+                    border-top-right-radius: 5px;
                     font-weight: bold;
                     font-size: 9pt;
                 }
@@ -2588,7 +2606,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 }
             """)
             subtab_comp_layout.addWidget(self.txt_coil_report, 1)
-            self.tab_sub_caracterizacao.addTab(subtab_comparativo, "📈 Comparativos de Lift-Off")
+            self.tab_sub_caracterizacao.addTab(subtab_comparativo, "Comparativos de Lift-Off")
     
             # =====================================================================
             # SUB-ABA 2: Monitoramento em Tempo Real & Diagnóstico do Sensor
@@ -2622,7 +2640,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.plot_coil_rt_auc.setLabel('bottom', 'Lift-Off (mm)')
             self.plot_coil_rt_auc.showGrid(x=True, y=True, alpha=0.3)
 
-            self.plot_coil_rt_scatter = self.win_coil_rt_plots.addPlot(row=1, col=1, title="Espaço de Características (AUC vs Tau) + Estrela Live (★)")
+            self.plot_coil_rt_scatter = self.win_coil_rt_plots.addPlot(row=1, col=1, title="Espaço de Características (AUC vs Tau) + Indicador Live")
             self.plot_coil_rt_scatter.setLabel('left', 'AUC (Counts.us)')
             self.plot_coil_rt_scatter.setLabel('bottom', 'Tau (us)')
             self.plot_coil_rt_scatter.showGrid(x=True, y=True, alpha=0.3)
@@ -2641,7 +2659,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 }
             """)
             subtab_rt_layout.addWidget(self.txt_coil_rt_report, 1)
-            self.tab_sub_caracterizacao.addTab(subtab_realtime, "⚡ Monitoramento em Tempo Real")
+            self.tab_sub_caracterizacao.addTab(subtab_realtime, "Monitoramento Tempo Real")
     
             # =====================================================================
             # SUB-ABA 3: Análise Estatística de Caracterização
@@ -2689,7 +2707,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 }
             """)
             subtab_st_layout.addWidget(self.txt_coil_st_report, 1)
-            self.tab_sub_caracterizacao.addTab(subtab_stats, "📊 Análise Estatística de Caracterização")
+            self.tab_sub_caracterizacao.addTab(subtab_stats, "Análise Estatística")
     
             coil_right_layout.addWidget(self.tab_sub_caracterizacao)
             self.tab_sub_caracterizacao.currentChanged.connect(self.ao_mudar_subaba_caracterizacao)
@@ -2699,7 +2717,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.splitter_tab_coil.setSizes([380, 1000])
             self.splitter_tab_coil.splitterMoved.connect(self.reorganizar_colunas_seletores_caracterizacao)
     
-            tab_coil_outer_layout.addWidget(self.splitter_tab_coil)
+            tab_coil_outer_layout.addWidget(self.splitter_tab_coil, 1)
+
+            if self.mode == "coil":
+                outer_layout.addWidget(self.tab_coil_char, 1)
 
         # Conecta sinal de mudança de aba
         self.tab_widget.currentChanged.connect(self.ao_mudar_aba)
@@ -5305,7 +5326,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         d_wind = info.get('diameter_winding_mm', info['diameter_mm'])
         h_wind = info.get('height_winding_mm', info['height_mm'])
         card_txt = f"""==================================================
-📌 CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
+CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
 ==================================================
 • Indutância Medida (L0):  {info['inductance_uh']:.2f} uH
 • Resistência Medida (R):  {info['resistance_ohm']:.2f} Ohm
@@ -6403,7 +6424,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                     if not hasattr(self, '_rt_star_item') or self._rt_star_item is None or self._rt_star_item not in self.plot_coil_rt_scatter.items:
                         self._rt_star_item = pg.ScatterPlotItem(
                             x=[live_tau], y=[live_auc],
-                            symbol='star', size=20,
+                            symbol='star', size=14,
                             brush=pg.mkBrush('#f1c40f'),
                             pen=pg.mkPen('#ffffff', width=2.0)
                         )
@@ -7008,8 +7029,8 @@ class ModuleLauncherWindow(QtWidgets.QMainWindow):
 
         lbl_card2_desc = QtWidgets.QLabel(
             "• Ensaio de bancada de Lift-Off e indutância L (\u03bcH)\n"
-            "• Grade 4-colunas de espaçadores (5mm, 4mm, 2mm, 1mm com 1x/2x)\n"
-            "• 3 Sub-Abas: 📈 Comparativos, ⚡ Tempo Real e 📊 Estatística\n"
+            "• Seleção de espaçadores (5mm, 4mm, 2mm, 1mm com 1x/2x)\n"
+            "• 3 Sub-Abas: Comparativos, Tempo Real e Estatística\n"
             "• Visualizador 3D interativo e gerador de relatórios"
         )
         lbl_card2_desc.setWordWrap(True)
