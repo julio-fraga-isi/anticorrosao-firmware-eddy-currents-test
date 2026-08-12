@@ -2508,6 +2508,37 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.chk_coil_enable_tooltips.stateChanged.connect(self.ao_alternar_exibicao_tooltips)
             group_coil_filters_layout.addWidget(self.chk_coil_enable_tooltips, max_rows_f + 2, 0, 1, 2)
 
+            # Controle de Janela da Média Móvel para o Sinal Live
+            box_ma = QtWidgets.QWidget()
+            layout_ma = QtWidgets.QHBoxLayout(box_ma)
+            layout_ma.setContentsMargins(0, 4, 0, 0)
+            layout_ma.setSpacing(6)
+            
+            lbl_ma = QtWidgets.QLabel("Média Móvel (Sinal Live):")
+            lbl_ma.setStyleSheet("color: #a0a0a0; font-size: 8.5pt; font-weight: bold;")
+            
+            self.combo_coil_ma_window = QtWidgets.QComboBox()
+            self.combo_coil_ma_window.addItems(["Desativada", "10 amostras", "50 amostras", "100 amostras"])
+            self.combo_coil_ma_window.setCurrentText("50 amostras")
+            self.combo_coil_ma_window.setToolTip("Define a janela da Média Móvel (curva verde lima neon) em tempo real")
+            self.combo_coil_ma_window.setStyleSheet("""
+                QComboBox {
+                    background-color: #2c2c2e;
+                    color: #76ff03;
+                    border: 1px solid #3a3a3c;
+                    border-radius: 4px;
+                    padding: 3px 6px;
+                    font-weight: bold;
+                    font-size: 8.5pt;
+                }
+                QComboBox::drop-down { border: none; }
+            """)
+            self.combo_coil_ma_window.currentTextChanged.connect(self.atualizar_todos_graficos_caracterizacao)
+            
+            layout_ma.addWidget(lbl_ma)
+            layout_ma.addWidget(self.combo_coil_ma_window)
+            group_coil_filters_layout.addWidget(box_ma, max_rows_f + 3, 0, 1, 2)
+
             scroll_coil_layout.addWidget(group_coil_filters)
 
             # 6. Painel de Legenda / Índice dos Gráficos
@@ -6367,14 +6398,45 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                 v = np.array(curva_raw)
 
         if t is not None and v is not None and len(t) > 0:
-            # Curva Medida Live (Verde Neon)
+            # Curva Medida Live (Verde Neon com 30% transparência e espessura fina 1.6)
             if not hasattr(self, '_rt_live_curve') or self._rt_live_curve is None or self._rt_live_curve not in self.plot_coil_rt_decay.items:
-                pen_live = pg.mkPen(color='#00ff00', width=3.2)
+                pen_live = pg.mkPen(color=(0, 255, 0, 180), width=1.6)
                 title_live = "Sinal Medido em Tempo Real (Osciloscópio Live)" if is_live_stream else "Sinal de Ensaio Carregado (Simulação Live)"
                 self._rt_live_curve = self.plot_coil_rt_decay.plot(t, v, pen=pen_live, name=title_live)
                 self._rt_live_curve.curve_title = title_live
             else:
                 self._rt_live_curve.setData(t, v)
+
+            # Curva de Média Móvel em Tempo Real (Verde Lima Neon)
+            ma_str = self.combo_coil_ma_window.currentText() if hasattr(self, 'combo_coil_ma_window') else "50 amostras"
+            if ma_str != "Desativada" and len(v) > 0:
+                try:
+                    n_win = int(ma_str.split()[0])
+                except Exception:
+                    n_win = 50
+
+                if len(v) >= n_win and n_win > 1:
+                    v_ma = np.convolve(v, np.ones(n_win) / n_win, mode='same')
+                    if not hasattr(self, '_rt_ma_curve') or self._rt_ma_curve is None or self._rt_ma_curve not in self.plot_coil_rt_decay.items:
+                        pen_ma = pg.mkPen(color='#76ff03', width=2.5)
+                        title_ma = f"Média Móvel (N = {n_win} Amostras)"
+                        self._rt_ma_curve = self.plot_coil_rt_decay.plot(t, v_ma, pen=pen_ma, name=title_ma)
+                        self._rt_ma_curve.curve_title = f"Curva de Média Móvel (N = {n_win})"
+                        self._rt_ma_curve.rec_data = {"filename": f"Média Móvel Live (N={n_win})", "material": self.obter_material_selecionado(), "classe": self.obter_classe_selecionada()}
+                    else:
+                        self._rt_ma_curve.setData(t, v_ma)
+                        self._rt_ma_curve.curve_title = f"Curva de Média Móvel (N = {n_win})"
+                        self._rt_ma_curve.rec_data = {"filename": f"Média Móvel Live (N={n_win})", "material": self.obter_material_selecionado(), "classe": self.obter_classe_selecionada()}
+                else:
+                    if hasattr(self, '_rt_ma_curve') and self._rt_ma_curve is not None:
+                        if self._rt_ma_curve in self.plot_coil_rt_decay.items:
+                            self.plot_coil_rt_decay.removeItem(self._rt_ma_curve)
+                        self._rt_ma_curve = None
+            else:
+                if hasattr(self, '_rt_ma_curve') and self._rt_ma_curve is not None:
+                    if self._rt_ma_curve in self.plot_coil_rt_decay.items:
+                        self.plot_coil_rt_decay.removeItem(self._rt_ma_curve)
+                    self._rt_ma_curve = None
 
             # Remove curva de referência estática legada se existente no gráfico de tempo real
             if hasattr(self, '_rt_ref_curve') and self._rt_ref_curve is None:
@@ -6552,18 +6614,26 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
         if melhor_item:
             if hover_decay_coords is not None:
                 self.atualizar_destaque_visual_hover(target_plot=melhor_plot, line_coords=hover_decay_coords)
-                title = getattr(melhor_item, 'curve_title', None)
-                if not title or callable(title) or title == ">":
-                    title = "Sinal Medido em Tempo Real (USB/COM)"
                 mat_sel = self.obter_material_selecionado()
                 cls_sel = self.obter_classe_selecionada()
                 active_info = getattr(self, 'active_coil_info', {})
                 active_id = active_info.get("id", "681")
 
                 rec_ref = getattr(melhor_item, 'rec_data', None)
-                filename_ref = rec_ref.get("filename", "Sinal Live USB/COM") if rec_ref else "Sinal Live USB/COM"
-                mat_ref = rec_ref.get("material", mat_sel) if rec_ref else mat_sel
-                cls_ref = rec_ref.get("classe", cls_sel) if rec_ref else cls_sel
+                if rec_ref and isinstance(rec_ref, dict):
+                    filename_ref = rec_ref.get("filename", "Sinal Live USB/COM")
+                    mat_ref = rec_ref.get("material", mat_sel)
+                    cls_ref = rec_ref.get("classe", cls_sel)
+                    default_title = f"Curva: {filename_ref}" if filename_ref != "Sinal Live USB/COM" else "Sinal Medido em Tempo Real (USB/COM)"
+                else:
+                    filename_ref = "Sinal Live USB/COM"
+                    mat_ref = mat_sel
+                    cls_ref = cls_sel
+                    default_title = "Sinal Medido em Tempo Real (USB/COM)"
+
+                title = getattr(melhor_item, 'curve_title', None)
+                if not title or callable(title) or title == ">":
+                    title = default_title
 
                 tooltip_text = (
                     f"📈 <b>{title}</b><br>"
