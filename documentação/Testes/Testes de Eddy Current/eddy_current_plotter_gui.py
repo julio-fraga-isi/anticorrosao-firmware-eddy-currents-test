@@ -5715,6 +5715,11 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
             return list(coils.values())[0]
         return self.coil_manager.register_coil("681", 660.9, 2.2, 14.7, 8.5, 150, "27", 0.361, "PLA")
 
+    def obter_base_selecionada(self):
+        if hasattr(self, 'chk_berco_maior') and self.chk_berco_maior.isChecked():
+            return "G"
+        return "P"
+
     def gravar_ensaio_caracterizacao(self):
         if self.last_valores is None or len(self.last_valores) < 60:
             QtWidgets.QMessageBox.warning(self, "Sem Dados", "Não há curva capturada para gravar! Inicie a leitura primeiro.")
@@ -5727,6 +5732,7 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
         sample_id = self.edit_coil_sample_id.text().strip()
         local_sel = self.obter_locais_amostra_selecionados()
         target_n = self.obter_num_amostras_selecionado()
+        base_sel = self.obter_base_selecionada()
 
         manual_flag = getattr(self, 'liftoff_manual_override', False)
         if target_n == 1:
@@ -5741,13 +5747,14 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                     dt_us=self.dt_us,
                     curves=list(self.last_valores),
                     local=local_sel,
-                    ajuste_manual_liftoff=manual_flag
+                    ajuste_manual_liftoff=manual_flag,
+                    base=base_sel
                 )
 
                 rec = self.coil_manager.read_characterization_csv(filepath)
                 if rec:
                     self.loaded_coil_records.append(rec)
-                    item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['local']}) ({rec['classe']}) [N=1] - {rec['filename']}"
+                    item_text = f"Bobina {rec['id_bobina']} (Base {rec.get('base', 'P')}) | {rec['distancia_mm']}mm | {rec['material']} ({rec['local']}) ({rec['classe']}) [N=1] - {rec['filename']}"
                     item = QtWidgets.QListWidgetItem(item_text)
                     item.setData(QtCore.Qt.UserRole, rec)
                     item.setSelected(True)
@@ -5756,7 +5763,7 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
 
                 QtWidgets.QMessageBox.information(
                     self, "Ensaio Gravado",
-                    f"Ensaio de caracterização com 1 amostra gravado com sucesso!\n\nLocal: {local_sel}\nAjuste Manual Lift-Off: {'Sim' if manual_flag else 'Não'}\nArquivo:\n{os.path.basename(filepath)}"
+                    f"Ensaio de caracterização com 1 amostra gravado com sucesso!\n\nBase: {base_sel}\nLocal: {local_sel}\nAjuste Manual Lift-Off: {'Sim' if manual_flag else 'Não'}\nArquivo:\n{os.path.basename(filepath)}"
                 )
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Erro ao Gravar", f"Erro ao gravar arquivo de caracterização: {e}")
@@ -5771,6 +5778,7 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                 self.coil_recording_classe = classe
                 self.coil_recording_local = local_sel
                 self.coil_recording_manual_liftoff = manual_flag
+                self.coil_recording_base = base_sel
                 self.is_recording_coil_multisample = True
                 
                 self.btn_record_coil_test.setEnabled(False)
@@ -5795,13 +5803,14 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                     dt_us=self.dt_us,
                     curves=curves_to_save,
                     local=local_sel,
-                    ajuste_manual_liftoff=manual_flag
+                    ajuste_manual_liftoff=manual_flag,
+                    base=base_sel
                 )
 
                 rec = self.coil_manager.read_characterization_csv(filepath)
                 if rec:
                     self.loaded_coil_records.append(rec)
-                    item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['local']}) ({rec['classe']}) [N={rec['num_samples']}] - {rec['filename']}"
+                    item_text = f"Bobina {rec['id_bobina']} (Base {rec.get('base', 'P')}) | {rec['distancia_mm']}mm | {rec['material']} ({rec['local']}) ({rec['classe']}) [N={rec['num_samples']}] - {rec['filename']}"
                     item = QtWidgets.QListWidgetItem(item_text)
                     item.setData(QtCore.Qt.UserRole, rec)
                     item.setSelected(True)
@@ -5810,7 +5819,7 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
 
                 QtWidgets.QMessageBox.information(
                     self, "Ensaio Gravado",
-                    f"Ensaio de {target_n} amostras gravado com sucesso no mesmo arquivo CSV!\n\nLocal: {local_sel}\nAjuste Manual Lift-Off: {'Sim' if manual_flag else 'Não'}\nArquivo:\n{os.path.basename(filepath)}"
+                    f"Ensaio de {target_n} amostras gravado com sucesso no mesmo arquivo CSV!\n\nBase: {base_sel}\nLocal: {local_sel}\nAjuste Manual Lift-Off: {'Sim' if manual_flag else 'Não'}\nArquivo:\n{os.path.basename(filepath)}"
                 )
 
     def finalizar_gravacao_multiamostras_caracterizacao(self):
@@ -5825,13 +5834,14 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                 dt_us=self.dt_us,
                 curves=self.coil_recording_buffer,
                 local=getattr(self, 'coil_recording_local', 'Não Especificado'),
-                ajuste_manual_liftoff=getattr(self, 'coil_recording_manual_liftoff', False)
+                ajuste_manual_liftoff=getattr(self, 'coil_recording_manual_liftoff', False),
+                base=getattr(self, 'coil_recording_base', 'P')
             )
 
             rec = self.coil_manager.read_characterization_csv(filepath)
             if rec:
                 self.loaded_coil_records.append(rec)
-                item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['local']}) ({rec['classe']}) [N={rec['num_samples']}] - {rec['filename']}"
+                item_text = f"Bobina {rec['id_bobina']} (Base {rec.get('base', 'P')}) | {rec['distancia_mm']}mm | {rec['material']} ({rec['local']}) ({rec['classe']}) [N={rec['num_samples']}] - {rec['filename']}"
                 item = QtWidgets.QListWidgetItem(item_text)
                 item.setData(QtCore.Qt.UserRole, rec)
                 item.setSelected(True)
@@ -5871,7 +5881,7 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
             # Evita duplicatas pelo caminho do arquivo
             if not any(r["filepath"] == rec["filepath"] for r in self.loaded_coil_records):
                 self.loaded_coil_records.append(rec)
-                item_text = f"Bobina {rec['id_bobina']} | {rec['distancia_mm']}mm | {rec['material']} ({rec['classe']}) - {rec['filename']}"
+                item_text = f"Bobina {rec['id_bobina']} (Base {rec.get('base', 'P')}) | {rec['distancia_mm']}mm | {rec['material']} ({rec['classe']}) - {rec['filename']}"
                 item = QtWidgets.QListWidgetItem(item_text)
                 item.setData(QtCore.Qt.UserRole, rec)
                 item.setSelected(True)

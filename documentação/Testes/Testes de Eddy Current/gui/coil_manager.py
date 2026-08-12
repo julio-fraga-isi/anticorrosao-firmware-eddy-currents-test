@@ -259,7 +259,7 @@ class CoilCharacterizationManager:
     def get_all_coils(self):
         return self.coils
 
-    def generate_standard_filename(self, id_amostra, coil_id, distance_mm, material, classe, local="Não Especificado", timestamp=None):
+    def generate_standard_filename(self, id_amostra, coil_id, distance_mm, material, classe, local="Não Especificado", timestamp=None, base="P"):
         if timestamp is None:
             ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         else:
@@ -283,6 +283,11 @@ class CoilCharacterizationManager:
         elif c_id.isdigit():
             c_id = f"{int(c_id):03d}"
 
+        # Formata Base (1 char, ex: P ou G)
+        base_code = str(base).strip().upper()
+        if base_code not in ["P", "G"]:
+            base_code = "P"
+
         # Formata Distância (max 4 chars + mm, ex: 10.9mm ou 0mm)
         dist_str = f"{float(distance_mm):.1f}"
 
@@ -290,11 +295,11 @@ class CoilCharacterizationManager:
         cls_code = converter_classe_para_codigo(classe)
         loc_code = converter_local_para_codigo(local)
 
-        # Padrão Simplificado Compacto: XXX-XXX-XXXXmm-XX-XX-XX-YYYYMMDD_HHMMSS.csv
-        filename = f"{s_id}-{c_id}-{dist_str}mm-{mat_code}-{cls_code}-{loc_code}-{ts_str}.csv"
+        # Novo Padrão Simplificado Compacto: {ID_BOBINA}-{BASE}-{DISTANCIA}mm-{ID_AMOSTRA}-{COD_MATERIAL}-{COD_CLASSE}-{COD_LOCAL}-{TIMESTAMP}.csv
+        filename = f"{c_id}-{base_code}-{dist_str}mm-{s_id}-{mat_code}-{cls_code}-{loc_code}-{ts_str}.csv"
         return filename
 
-    def save_characterization_record(self, output_dir, id_amostra, coil_info, distance_mm, material, classe, dt_us, curves, local="Não Especificado", timestamp=None, ajuste_manual_liftoff=False):
+    def save_characterization_record(self, output_dir, id_amostra, coil_info, distance_mm, material, classe, dt_us, curves, local="Não Especificado", timestamp=None, ajuste_manual_liftoff=False, base="P"):
         if timestamp is None:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -314,12 +319,13 @@ class CoilCharacterizationManager:
             material=material,
             classe=classe,
             local=local,
-            timestamp=timestamp
+            timestamp=timestamp,
+            base=base
         )
         filepath = os.path.join(output_dir, filename)
 
         header = [
-            "id_amostra", "local", "id_bobina", "indutancia_uh", "resistencia_ohm",
+            "id_amostra", "base", "local", "id_bobina", "indutancia_uh", "resistencia_ohm",
             "diametro_mm", "altura_mm", "espiras", "fio_awg", "nucleo",
             "distancia_mm", "ajuste_manual_liftoff", "material", "classe", "timestamp", "dt_us"
         ] + [f"p_{i}" for i in range(256)]
@@ -329,6 +335,7 @@ class CoilCharacterizationManager:
             sample_label = f"{id_amostra}_{idx+1}" if len(curves_list) > 1 else str(id_amostra)
             row = [
                 sample_label,
+                base,
                 local,
                 coil_info["id"],
                 f"{coil_info['inductance_uh']:.2f}",
@@ -382,6 +389,12 @@ class CoilCharacterizationManager:
         first_row = rows[0]
         try:
             id_amostra = first_row[headers.index("id_amostra")] if "id_amostra" in headers else first_row[0]
+            base = first_row[headers.index("base")] if "base" in headers else "P"
+            if "base" not in headers:
+                fname_parts = os.path.basename(filepath).split("-")
+                if len(fname_parts) >= 8 and fname_parts[1].upper() in ["P", "G"]:
+                    base = fname_parts[1].upper()
+
             local = first_row[headers.index("local")] if "local" in headers else "Não Especificado"
             id_bobina = first_row[headers.index("id_bobina")] if "id_bobina" in headers else "681"
             indutancia_uh = float(first_row[headers.index("indutancia_uh")]) if "indutancia_uh" in headers else 697.0
@@ -433,6 +446,7 @@ class CoilCharacterizationManager:
             "filename": os.path.basename(filepath),
             "num_samples": len(all_curves),
             "id_amostra": id_amostra,
+            "base": base,
             "local": local,
             "id_bobina": id_bobina,
             "indutancia_uh": indutancia_uh,
