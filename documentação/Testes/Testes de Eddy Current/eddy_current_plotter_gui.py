@@ -6376,113 +6376,87 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
             else:
                 self._rt_live_curve.setData(t, v)
 
-            active_info = getattr(self, 'active_coil_info', {})
-            active_id = active_info.get("id", "681")
-            
-            ref_curve = None
-            ref_rec = None
-            if recs:
-                matches = [r for r in recs if str(r.get("id_bobina", "")) == str(active_id)]
-                if matches:
-                    ref_rec = matches[0]
-                    ref_curve = ref_rec.get("curva", None)
+            # Remove curva de referência estática legada se existente no gráfico de tempo real
+            if hasattr(self, '_rt_ref_curve') and self._rt_ref_curve is None:
+                pass
+            elif hasattr(self, '_rt_ref_curve') and self._rt_ref_curve is not None:
+                if self._rt_ref_curve in self.plot_coil_rt_decay.items:
+                    self.plot_coil_rt_decay.removeItem(self._rt_ref_curve)
+                self._rt_ref_curve = None
+
+            fonte_txt = "Transmissão Serial USB/COM Ativa em Tempo Real" if is_live_stream else "Sinal de Ensaio CSV Carregado (Modo Offline / Demonstração)"
+
+            live_tau = getattr(self, 'last_tau', 0.0)
+            live_auc = getattr(self, 'last_auc', 0.0)
+            d_liftoff = round(getattr(self, 'distancia_lift_off', self.spin_liftoff_dist.value() if hasattr(self, 'spin_liftoff_dist') else 0.0), 2)
+
+            # Converte o Lift-Off para a escala do gráfico e encaixa na distância exata gravada nos CSVs
+            recs_check = getattr(self, 'loaded_coil_records', [])
+            has_large_dists = any(float(r.get("distancia_mm", 0.0)) > 10.0 for r in recs_check)
+            if has_large_dists and d_liftoff < 10.0:
+                d_liftoff_plot = round(d_liftoff * 1000.0, 1)
+            else:
+                d_liftoff_plot = d_liftoff
+
+            # Snap de precisão para bater exatamente com a coordenada do arquivo CSV se a diferença for imperceptível (< 0.5 um / < 0.05 mm)
+            if recs_check:
+                for r in recs_check:
+                    d_r = float(r.get("distancia_mm", 0.0))
+                    d_r_scaled = d_r if (d_r > 10.0 or not has_large_dists) else d_r * 1000.0
+                    if abs(d_r_scaled - d_liftoff_plot) < 0.5:
+                        d_liftoff_plot = d_r_scaled
+                        break
+
+            # Se last_tau/last_auc não estiverem definidos na simulação, calcula na hora a partir do sinal
+            if (live_tau <= 0 or live_auc <= 0) and v is not None and len(v) > 10:
+                dt_u = getattr(self, 'dt_us', 0.1)
+                live_tau, live_auc = calcular_tau_e_auc(v, dt_u)
+
+            # Overlays Live nas distribuições Tau, AUC e Scatter
+            if live_tau > 0:
+                if not hasattr(self, '_rt_tau_line') or self._rt_tau_line is None or self._rt_tau_line not in self.plot_coil_rt_tau.items:
+                    self._rt_tau_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('#ffff00', width=1.5, style=QtCore.Qt.DashLine))
+                    self.plot_coil_rt_tau.addItem(self._rt_tau_line)
+                    self._rt_tau_pt = pg.ScatterPlotItem(x=[d_liftoff_plot], y=[live_tau], symbol='star', size=16, brush=pg.mkBrush('#f1c40f'), pen=pg.mkPen('w', width=1.5))
+                    self.plot_coil_rt_tau.addItem(self._rt_tau_pt)
                 else:
-                    ref_rec = recs[0]
-                    ref_curve = ref_rec.get("curva", None)
+                    self._rt_tau_line.setValue(live_tau)
+                    self._rt_tau_pt.setData(x=[d_liftoff_plot], y=[live_tau])
 
-            if ref_curve is not None:
-                n_pts = min(len(v), len(ref_curve))
-                t_sub = t[:n_pts]
-                v_live_sub = v[:n_pts]
-                v_ref_sub = np.array(ref_curve[:n_pts])
-
-                # Curva Referência (Azul)
-                if not hasattr(self, '_rt_ref_curve') or self._rt_ref_curve is None or self._rt_ref_curve not in self.plot_coil_rt_decay.items:
-                    mat_ref = ref_rec.get("material", "A36 Comum") if ref_rec else self.obter_material_selecionado()
-                    estilo_ref = obter_estilo_material(mat_ref)
-                    pen_ref = pg.mkPen(color='#29b6f6', width=2.2, style=estilo_ref)
-                    self._rt_ref_curve = self.plot_coil_rt_decay.plot(t_sub, v_ref_sub, pen=pen_ref, name=f"Ref. B.{active_id}")
-                    self._rt_ref_curve.curve_title = f"Curva de Referência do Sensor B.{active_id}"
+            if live_auc > 0:
+                if not hasattr(self, '_rt_auc_line') or self._rt_auc_line is None or self._rt_auc_line not in self.plot_coil_rt_auc.items:
+                    self._rt_auc_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('#ffff00', width=1.5, style=QtCore.Qt.DashLine))
+                    self.plot_coil_rt_auc.addItem(self._rt_auc_line)
+                    self._rt_auc_pt = pg.ScatterPlotItem(x=[d_liftoff_plot], y=[live_auc], symbol='star', size=16, brush=pg.mkBrush('#f1c40f'), pen=pg.mkPen('w', width=1.5))
+                    self.plot_coil_rt_auc.addItem(self._rt_auc_pt)
                 else:
-                    self._rt_ref_curve.setData(t_sub, v_ref_sub)
-                if ref_rec:
-                    self._rt_ref_curve.rec_data = ref_rec
+                    self._rt_auc_line.setValue(live_auc)
+                    self._rt_auc_pt.setData(x=[d_liftoff_plot], y=[live_auc])
 
-                rms_err = float(np.sqrt(np.mean((v_live_sub - v_ref_sub)**2)))
-                status_txt = "<b style='color:#00e676;'>ESTÁVEL (Conforme Ref.)</b>" if rms_err < 150 else "<b style='color:#e74c3c;'>ATENÇÃO: Desvio Térmico / Alinhamento</b>"
-                fonte_txt = "Transmissão Serial USB/COM Ativa em Tempo Real" if is_live_stream else "Sinal de Ensaio CSV Carregado (Modo Offline / Demonstração)"
-
-                live_tau = getattr(self, 'last_tau', 0.0)
-                live_auc = getattr(self, 'last_auc', 0.0)
-                d_liftoff = round(getattr(self, 'distancia_lift_off', self.spin_liftoff_dist.value() if hasattr(self, 'spin_liftoff_dist') else 0.0), 2)
-
-                # Converte o Lift-Off para a escala do gráfico e encaixa na distância exata gravada nos CSVs
-                recs_check = getattr(self, 'loaded_coil_records', [])
-                has_large_dists = any(float(r.get("distancia_mm", 0.0)) > 10.0 for r in recs_check)
-                if has_large_dists and d_liftoff < 10.0:
-                    d_liftoff_plot = round(d_liftoff * 1000.0, 1)
-                else:
-                    d_liftoff_plot = d_liftoff
-
-                # Snap de precisão para bater exatamente com a coordenada do arquivo CSV se a diferença for imperceptível (< 0.5 um / < 0.05 mm)
-                if recs_check:
-                    for r in recs_check:
-                        d_r = float(r.get("distancia_mm", 0.0))
-                        d_r_scaled = d_r if (d_r > 10.0 or not has_large_dists) else d_r * 1000.0
-                        if abs(d_r_scaled - d_liftoff_plot) < 0.5:
-                            d_liftoff_plot = d_r_scaled
-                            break
-
-                # Se last_tau/last_auc não estiverem definidos na simulação, calcula na hora a partir do sinal
-                if (live_tau <= 0 or live_auc <= 0) and v is not None and len(v) > 10:
-                    dt_u = getattr(self, 'dt_us', 0.1)
-                    live_tau, live_auc = calcular_tau_e_auc(v, dt_u)
-
-                # Overlays Live nas distribuições Tau, AUC e Scatter
-                if live_tau > 0:
-                    if not hasattr(self, '_rt_tau_line') or self._rt_tau_line is None or self._rt_tau_line not in self.plot_coil_rt_tau.items:
-                        self._rt_tau_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('#ffff00', width=1.5, style=QtCore.Qt.DashLine))
-                        self.plot_coil_rt_tau.addItem(self._rt_tau_line)
-                        self._rt_tau_pt = pg.ScatterPlotItem(x=[d_liftoff_plot], y=[live_tau], symbol='star', size=16, brush=pg.mkBrush('#f1c40f'), pen=pg.mkPen('w', width=1.5))
-                        self.plot_coil_rt_tau.addItem(self._rt_tau_pt)
-                    else:
-                        self._rt_tau_line.setValue(live_tau)
-                        self._rt_tau_pt.setData(x=[d_liftoff_plot], y=[live_tau])
-
-                if live_auc > 0:
-                    if not hasattr(self, '_rt_auc_line') or self._rt_auc_line is None or self._rt_auc_line not in self.plot_coil_rt_auc.items:
-                        self._rt_auc_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('#ffff00', width=1.5, style=QtCore.Qt.DashLine))
-                        self.plot_coil_rt_auc.addItem(self._rt_auc_line)
-                        self._rt_auc_pt = pg.ScatterPlotItem(x=[d_liftoff_plot], y=[live_auc], symbol='star', size=16, brush=pg.mkBrush('#f1c40f'), pen=pg.mkPen('w', width=1.5))
-                        self.plot_coil_rt_auc.addItem(self._rt_auc_pt)
-                    else:
-                        self._rt_auc_line.setValue(live_auc)
-                        self._rt_auc_pt.setData(x=[d_liftoff_plot], y=[live_auc])
-
-                if live_tau > 0 and live_auc > 0:
-                    # ESTRELA AMARELA NEON MOVEL EM TEMPO REAL NO ESPAÇO DE CARACTERÍSTICAS
-                    if not hasattr(self, '_rt_star_item') or self._rt_star_item is None or self._rt_star_item not in self.plot_coil_rt_scatter.items:
-                        self._rt_star_item = pg.ScatterPlotItem(
-                            x=[live_tau], y=[live_auc],
-                            symbol='star', size=14,
-                            brush=pg.mkBrush('#f1c40f'),
-                            pen=pg.mkPen('#ffffff', width=2.0)
-                        )
-                        self.plot_coil_rt_scatter.addItem(self._rt_star_item)
-                    else:
-                        self._rt_star_item.setData(x=[live_tau], y=[live_auc])
-
-                # Atualiza o painel de relatório em HTML em taxa reduzida (4 FPS / 250ms) para evitar reflows de texto no Qt
-                last_html_time = getattr(self, '_last_rt_html_time', 0.0)
-                if force_refresh or (now - last_html_time) > 0.25:
-                    self._last_rt_html_time = now
-                    self.txt_coil_rt_report.setHtml(
-                        f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
-                        f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')}) | <b>Lift-Off Atual:</b> {d_liftoff:.2f} mm<br>"
-                        f"<b>Fonte do Sinal:</b> {fonte_txt}<br>"
-                        f"<b>Medições Live:</b> Tau = {self.formatar_valor_tempo(live_tau)} | AUC = {live_auc:.1f}<br>"
-                        f"<small style='color:#a0a0a0;'>Gráficos e marcadores ativos ★ atualizados continuamente via interface USB/COM.</small>"
+            if live_tau > 0 and live_auc > 0:
+                # ESTRELA AMARELA NEON MOVEL EM TEMPO REAL NO ESPAÇO DE CARACTERÍSTICAS
+                if not hasattr(self, '_rt_star_item') or self._rt_star_item is None or self._rt_star_item not in self.plot_coil_rt_scatter.items:
+                    self._rt_star_item = pg.ScatterPlotItem(
+                        x=[live_tau], y=[live_auc],
+                        symbol='star', size=14,
+                        brush=pg.mkBrush('#f1c40f'),
+                        pen=pg.mkPen('#ffffff', width=2.0)
                     )
+                    self.plot_coil_rt_scatter.addItem(self._rt_star_item)
+                else:
+                    self._rt_star_item.setData(x=[live_tau], y=[live_auc])
+
+            # Atualiza o painel de relatório em HTML em taxa reduzida (4 FPS / 250ms) para evitar reflows de texto no Qt
+            last_html_time = getattr(self, '_last_rt_html_time', 0.0)
+            if force_refresh or (now - last_html_time) > 0.25:
+                self._last_rt_html_time = now
+                self.txt_coil_rt_report.setHtml(
+                    f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
+                    f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')}) | <b>Lift-Off Atual:</b> {d_liftoff:.2f} mm<br>"
+                    f"<b>Fonte do Sinal:</b> {fonte_txt}<br>"
+                    f"<b>Medições Live:</b> Tau = {self.formatar_valor_tempo(live_tau)} | AUC = {live_auc:.1f}<br>"
+                    f"<small style='color:#a0a0a0;'>Gráficos e marcadores ativos ★ atualizados continuamente via interface USB/COM.</small>"
+                )
             else:
                 self.txt_coil_rt_report.setHtml(
                     f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
@@ -6578,7 +6552,9 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
         if melhor_item:
             if hover_decay_coords is not None:
                 self.atualizar_destaque_visual_hover(target_plot=melhor_plot, line_coords=hover_decay_coords)
-                title = getattr(melhor_item, 'curve_title', melhor_item.name or "Sinal em Tempo Real")
+                title = getattr(melhor_item, 'curve_title', None)
+                if not title or callable(title) or title == ">":
+                    title = "Sinal Medido em Tempo Real (USB/COM)"
                 mat_sel = self.obter_material_selecionado()
                 cls_sel = self.obter_classe_selecionada()
                 active_info = getattr(self, 'active_coil_info', {})
