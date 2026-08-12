@@ -331,17 +331,40 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         else:
             super().mousePressEvent(event)
 
+    def calculate_ideal_size(self):
+        self.layout_main.activate()
+        self.box_layout.activate()
+        sh = self.sizeHint()
+        sh_box = self.box_frame.sizeHint()
+        
+        doc_margin_w = 24
+        doc_margin_h = 24
+        
+        self.lbl_content.adjustSize()
+        lbl_sh = self.lbl_content.sizeHint()
+        
+        ideal_w = min(420, max(260, max(sh.width(), sh_box.width(), lbl_sh.width() + doc_margin_w)))
+        content_w = ideal_w - doc_margin_w
+        
+        h_fw = self.lbl_content.heightForWidth(int(content_w))
+        content_h = h_fw if h_fw > 0 else lbl_sh.height()
+            
+        header_h = 32 if self.header_frame.isVisible() else 0
+        ideal_h = content_h + header_h + doc_margin_h + 10
+        
+        final_w = max(ideal_w, sh.width(), sh_box.width())
+        final_h = max(ideal_h, sh.height(), sh_box.height())
+        return QtCore.QSize(int(final_w), int(final_h))
+
     def set_content(self, html_text):
         self.lbl_content.setText(html_text)
-        self.layout_main.activate()
-        self.adjustSize()
+        sz = self.calculate_ideal_size()
+        self.resize(sz)
 
     def move_safe(self, pos_global):
-        self.layout_main.activate()
-        self.adjustSize()
-        hint = self.sizeHint()
-        w = max(hint.width(), self.width())
-        h = max(hint.height(), self.height())
+        sz = self.calculate_ideal_size()
+        w = sz.width()
+        h = sz.height()
 
         screen = QtWidgets.QApplication.desktop().availableGeometry(pos_global)
         
@@ -393,8 +416,8 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         if pos_global:
             self.move_safe(pos_global)
         else:
-            self.layout_main.activate()
-            self.adjustSize()
+            sz = self.calculate_ideal_size()
+            self.resize(sz)
         self.show()
 
     def fechar_tooltip(self):
