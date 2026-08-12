@@ -337,20 +337,20 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         sh = self.sizeHint()
         sh_box = self.box_frame.sizeHint()
         
-        doc_margin_w = 24
-        doc_margin_h = 24
+        doc_margin_w = 28
+        doc_margin_h = 28
         
         self.lbl_content.adjustSize()
         lbl_sh = self.lbl_content.sizeHint()
         
-        ideal_w = min(420, max(260, max(sh.width(), sh_box.width(), lbl_sh.width() + doc_margin_w)))
+        ideal_w = min(440, max(280, max(sh.width(), sh_box.width(), lbl_sh.width() + doc_margin_w)))
         content_w = ideal_w - doc_margin_w
         
         h_fw = self.lbl_content.heightForWidth(int(content_w))
         content_h = h_fw if h_fw > 0 else lbl_sh.height()
             
-        header_h = 32 if self.header_frame.isVisible() else 0
-        ideal_h = content_h + header_h + doc_margin_h + 10
+        header_h = 36 if self.header_frame.isVisible() else 0
+        ideal_h = content_h + header_h + doc_margin_h + 40
         
         final_w = max(ideal_w, sh.width(), sh_box.width())
         final_h = max(ideal_h, sh.height(), sh_box.height())
