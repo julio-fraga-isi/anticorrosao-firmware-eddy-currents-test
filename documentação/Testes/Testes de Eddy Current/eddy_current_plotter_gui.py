@@ -266,34 +266,36 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         self.box_frame = QtWidgets.QFrame(self)
         self.box_frame.setStyleSheet("""
             QFrame {
-                background-color: rgba(22, 22, 28, 0.72);
-                border: 2px solid rgba(41, 182, 246, 0.90);
-                border-radius: 8px;
+                background-color: rgba(20, 20, 26, 0.88);
+                border: 1px solid rgba(41, 182, 246, 0.35);
+                border-radius: 6px;
                 color: #ffffff;
             }
         """)
         self.box_layout = QtWidgets.QVBoxLayout(self.box_frame)
-        self.box_layout.setContentsMargins(10, 8, 10, 8)
-        self.box_layout.setSpacing(6)
+        self.box_layout.setContentsMargins(8, 6, 8, 6)
+        self.box_layout.setSpacing(4)
 
-        # Barra Superior de Controle (Botão Fechar ✕)
+        # Barra Superior de Controle (Botão Fechar ✕ - Modo Pinned)
         self.header_frame = QtWidgets.QFrame(self.box_frame)
         self.header_layout = QtWidgets.QHBoxLayout(self.header_frame)
-        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_layout.setContentsMargins(0, 0, 0, 2)
+        self.header_layout.setSpacing(4)
         
-        self.lbl_pin_status = QtWidgets.QLabel("📌 <b>TOOLTIP FIXADO</b>", self.header_frame)
-        self.lbl_pin_status.setStyleSheet("color: #00e676; font-size: 10pt; font-family: Segoe UI;")
+        self.lbl_pin_status = QtWidgets.QLabel("📌 <b>FIXADO</b>", self.header_frame)
+        self.lbl_pin_status.setStyleSheet("color: #00e676; font-size: 8.5pt; font-family: Segoe UI;")
         
         self.btn_close = QtWidgets.QPushButton("✕", self.header_frame)
-        self.btn_close.setFixedSize(22, 22)
+        self.btn_close.setFixedSize(18, 18)
         self.btn_close.setCursor(QtCore.Qt.PointingHandCursor)
-        self.btn_close.setToolTip("Fechar Tooltip Fixado (ou clique fora dele)")
+        self.btn_close.setToolTip("Fechar Tooltip Fixado")
         self.btn_close.setStyleSheet("""
             QPushButton {
-                background-color: #ff5252;
+                background-color: #e53935;
                 color: white;
                 font-weight: bold;
-                border-radius: 11px;
+                font-size: 8pt;
+                border-radius: 9px;
                 border: none;
             }
             QPushButton:hover {
@@ -313,7 +315,7 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         self.lbl_content.setTextFormat(QtCore.Qt.RichText)
         self.lbl_content.setWordWrap(True)
         self.lbl_content.setMaximumWidth(420)
-        self.lbl_content.setStyleSheet("color: #ffffff; font-size: 9.5pt; font-family: Segoe UI, sans-serif; background: transparent;")
+        self.lbl_content.setStyleSheet("color: #ffffff; font-size: 9pt; font-family: Segoe UI, sans-serif; background: transparent;")
         self.box_layout.addWidget(self.lbl_content)
 
         self.layout_main.addWidget(self.box_frame)
@@ -337,20 +339,20 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         sh = self.sizeHint()
         sh_box = self.box_frame.sizeHint()
         
-        doc_margin_w = 28
-        doc_margin_h = 28
+        doc_margin_w = 16
+        doc_margin_h = 12
         
         self.lbl_content.adjustSize()
         lbl_sh = self.lbl_content.sizeHint()
         
-        ideal_w = min(440, max(280, max(sh.width(), sh_box.width(), lbl_sh.width() + doc_margin_w)))
+        ideal_w = min(430, max(260, max(sh.width(), sh_box.width(), lbl_sh.width() + doc_margin_w)))
         content_w = ideal_w - doc_margin_w
         
         h_fw = self.lbl_content.heightForWidth(int(content_w))
         content_h = h_fw if h_fw > 0 else lbl_sh.height()
             
-        header_h = 36 if self.header_frame.isVisible() else 0
-        ideal_h = content_h + header_h + doc_margin_h + 40
+        header_h = 24 if self.header_frame.isVisible() else 0
+        ideal_h = content_h + header_h + doc_margin_h + 6
         
         final_w = max(ideal_w, sh.width(), sh_box.width())
         final_h = max(ideal_h, sh.height(), sh_box.height())
@@ -388,9 +390,9 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         self.header_frame.hide()
         self.box_frame.setStyleSheet("""
             QFrame {
-                background-color: rgba(22, 22, 28, 0.72);
-                border: 2px solid rgba(41, 182, 246, 0.90);
-                border-radius: 8px;
+                background-color: rgba(20, 20, 26, 0.88);
+                border: 1px solid rgba(41, 182, 246, 0.35);
+                border-radius: 6px;
                 color: #ffffff;
             }
         """)
@@ -405,9 +407,9 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         self.header_frame.show()
         self.box_frame.setStyleSheet("""
             QFrame {
-                background-color: rgba(30, 30, 42, 0.85);
-                border: 2.5px solid rgba(0, 230, 118, 0.95);
-                border-radius: 8px;
+                background-color: rgba(22, 22, 30, 0.92);
+                border: 1px solid rgba(0, 230, 118, 0.45);
+                border-radius: 6px;
                 color: #ffffff;
             }
         """)
