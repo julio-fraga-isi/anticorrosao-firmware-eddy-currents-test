@@ -2602,23 +2602,33 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.win_coil_rt_plots.setBackground('#121214')
             self.win_coil_rt_plots.scene().sigMouseMoved.connect(self.ao_mover_mouse_grafico_rt_caracterizacao)
             self.win_coil_rt_plots.scene().sigMouseClicked.connect(self.ao_clicar_mouse_grafico)
+
+            self.plot_coil_rt_decay = self.win_coil_rt_plots.addPlot(row=0, col=0, title="Sinais de Decaimento V(t) (Histórico CSV + Live Verde Neon)")
+            self.plot_coil_rt_decay.setLabel('left', 'ADC Counts')
+            self.plot_coil_rt_decay.setLabel('bottom', 'Tempo (us)')
+            self.plot_coil_rt_decay.showGrid(x=True, y=True, alpha=0.3)
+
+            # Apelidos para compatibilidade retroativa
+            self.plot_coil_rt_live = self.plot_coil_rt_decay
+            self.plot_coil_rt_overlay = self.plot_coil_rt_decay
+
+            self.plot_coil_rt_tau = self.win_coil_rt_plots.addPlot(row=0, col=1, title="Distribuição da Constante de Tempo (Tau) + Indicador Live")
+            self.plot_coil_rt_tau.setLabel('left', 'Tau (us)')
+            self.plot_coil_rt_tau.setLabel('bottom', 'Lift-Off (mm)')
+            self.plot_coil_rt_tau.showGrid(x=True, y=True, alpha=0.3)
+
+            self.plot_coil_rt_auc = self.win_coil_rt_plots.addPlot(row=1, col=0, title="Distribuição da Área sob a Curva (AUC) + Indicador Live")
+            self.plot_coil_rt_auc.setLabel('left', 'AUC (Counts.us)')
+            self.plot_coil_rt_auc.setLabel('bottom', 'Lift-Off (mm)')
+            self.plot_coil_rt_auc.showGrid(x=True, y=True, alpha=0.3)
+
+            self.plot_coil_rt_scatter = self.win_coil_rt_plots.addPlot(row=1, col=1, title="Espaço de Características (AUC vs Tau) + Estrela Live (★)")
+            self.plot_coil_rt_scatter.setLabel('left', 'AUC (Counts.us)')
+            self.plot_coil_rt_scatter.setLabel('bottom', 'Tau (us)')
+            self.plot_coil_rt_scatter.showGrid(x=True, y=True, alpha=0.3)
+
             subtab_rt_layout.addWidget(self.criar_barrafullscreen_container(self.win_coil_rt_plots, "Sub-Aba 2: Monitoramento em Tempo Real do Sensor"))
-            subtab_rt_layout.addWidget(self.win_coil_rt_plots, 2)
-    
-            self.plot_coil_rt_live = self.win_coil_rt_plots.addPlot(row=0, col=0, title="Sinal Transiente em Tempo Real V(t) [Osciloscópio Live]")
-            self.plot_coil_rt_live.setLabel('left', 'ADC Counts')
-            self.plot_coil_rt_live.setLabel('bottom', 'Tempo (us)')
-            self.plot_coil_rt_live.showGrid(x=True, y=True, alpha=0.3)
-    
-            self.plot_coil_rt_overlay = self.win_coil_rt_plots.addPlot(row=0, col=1, title="Sobreposição Live vs Curva de Referência do Sensor")
-            self.plot_coil_rt_overlay.setLabel('left', 'ADC Counts')
-            self.plot_coil_rt_overlay.setLabel('bottom', 'Tempo (us)')
-            self.plot_coil_rt_overlay.showGrid(x=True, y=True, alpha=0.3)
-    
-            self.plot_coil_rt_residual = self.win_coil_rt_plots.addPlot(row=1, col=0, colSpan=2, title="Sinal Residual Delta V(t) [Medido - Referência]")
-            self.plot_coil_rt_residual.setLabel('left', 'Delta ADC Counts')
-            self.plot_coil_rt_residual.setLabel('bottom', 'Tempo (us)')
-            self.plot_coil_rt_residual.showGrid(x=True, y=True, alpha=0.3)
+            subtab_rt_layout.addWidget(self.win_coil_rt_plots, 3)
     
             self.txt_coil_rt_report = QtWidgets.QTextEdit()
             self.txt_coil_rt_report.setReadOnly(True)
@@ -2821,9 +2831,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
         # Módulo 2 Sub-Aba 2
         if hasattr(self, 'win_coil_rt_plots'):
-            if hasattr(self, 'plot_coil_rt_live'): self.configurar_expansao_grafico_individual(self.plot_coil_rt_live, self.win_coil_rt_plots)
-            if hasattr(self, 'plot_coil_rt_overlay'): self.configurar_expansao_grafico_individual(self.plot_coil_rt_overlay, self.win_coil_rt_plots)
-            if hasattr(self, 'plot_coil_rt_residual'): self.configurar_expansao_grafico_individual(self.plot_coil_rt_residual, self.win_coil_rt_plots)
+            if hasattr(self, 'plot_coil_rt_decay'): self.configurar_expansao_grafico_individual(self.plot_coil_rt_decay, self.win_coil_rt_plots)
+            if hasattr(self, 'plot_coil_rt_tau'): self.configurar_expansao_grafico_individual(self.plot_coil_rt_tau, self.win_coil_rt_plots)
+            if hasattr(self, 'plot_coil_rt_auc'): self.configurar_expansao_grafico_individual(self.plot_coil_rt_auc, self.win_coil_rt_plots)
+            if hasattr(self, 'plot_coil_rt_scatter'): self.configurar_expansao_grafico_individual(self.plot_coil_rt_scatter, self.win_coil_rt_plots)
 
         # Módulo 2 Sub-Aba 3
         if hasattr(self, 'win_coil_st_plots'):
@@ -3420,6 +3431,9 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     def processar_nova_curva(self, valores, elapsed_cycles=0):
         if not self.leitura_ativa and not self.capturar_uma_curva:
             return
+        # Se houver uma janela modal (QMessageBox, QFileDialog) aberta na tela, interrompe o processamento de visualização instantâneo para evitar reentrada do evento Qt e congelamento do GUI
+        if QtWidgets.QApplication.activeModalWidget() is not None:
+            return
         if self.capturar_uma_curva:
             self.capturar_uma_curva = False
 
@@ -3597,11 +3611,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             modo_nome = "ETS" if not is_auto else "DMA"
             self.plot_decay.setLabel('bottom', f'Tempo (Modo {modo_nome} - {khz:.2f} kHz)', unid_t)
         
-        # Atualiza os gráficos do Módulo 2
+        # Atualiza os gráficos do Módulo 2 APENAS se a Sub-Aba 2 (Monitoramento em Tempo Real) estiver visível/ativa
         if hasattr(self, 'tab_sub_caracterizacao'):
-            self.atualizar_graficos_tempo_real_caracterizacao()
-        elif hasattr(self, 'mode') and self.mode in ["all", "coil"]:
-            self.atualizar_graficos_tempo_real_caracterizacao()
+            if self.tab_sub_caracterizacao.currentIndex() == 1:
+                self.atualizar_graficos_tempo_real_caracterizacao()
 
         # 6.5. Atualiza os gráficos da Aba 4 (Diagnóstico em Tempo Real) se estiver ativa
         if hasattr(self, 'tab_widget') and self.tab_widget.currentIndex() == 3:
@@ -5234,13 +5247,17 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if h_bobina <= 0:
                 h_bobina = info.get('height_winding_mm', 8.5)
 
-        d_liftoff = max(0.0, h_total_berco - h_bobina)
+        d_liftoff = round(max(0.0, h_total_berco - h_bobina), 2)
         self._last_calculated_liftoff = d_liftoff
+        self.distancia_lift_off = d_liftoff
         self.liftoff_manual_override = False
 
         self._ignore_spin_liftoff_signals = True
         self.spin_liftoff_dist.setValue(d_liftoff)
         self._ignore_spin_liftoff_signals = False
+
+        if hasattr(self, 'tab_sub_caracterizacao') and self.tab_sub_caracterizacao.currentIndex() == 1:
+            self.atualizar_graficos_tempo_real_caracterizacao(force_refresh=True)
 
         partes = []
         if count_5mm > 0: partes.append(f"{count_5mm}x 5mm")
@@ -5275,9 +5292,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
             if reply == QtWidgets.QMessageBox.Yes:
                 self.liftoff_manual_override = True
+                self.distancia_lift_off = round(val, 2)
+                if hasattr(self, 'tab_sub_caracterizacao') and self.tab_sub_caracterizacao.currentIndex() == 1:
+                    self.atualizar_graficos_tempo_real_caracterizacao(force_refresh=True)
             else:
                 self._ignore_spin_liftoff_signals = True
                 self.spin_liftoff_dist.setValue(last_calc)
+                self.distancia_lift_off = round(last_calc, 2)
                 self._ignore_spin_liftoff_signals = False
 
     def atualizar_card_especificacoes_bobina(self, info):
@@ -5823,6 +5844,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             return
 
         count_added = 0
+        if hasattr(self, 'list_imported_coil_files'):
+            self.list_imported_coil_files.blockSignals(True)
         for rec in recs:
             # Evita duplicatas pelo caminho do arquivo
             if not any(r["filepath"] == rec["filepath"] for r in self.loaded_coil_records):
@@ -5831,10 +5854,19 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 item = QtWidgets.QListWidgetItem(item_text)
                 item.setData(QtCore.Qt.UserRole, rec)
                 item.setSelected(True)
-                self.list_imported_coil_files.addItem(item)
+                if hasattr(self, 'list_imported_coil_files'):
+                    self.list_imported_coil_files.addItem(item)
                 count_added += 1
+        if hasattr(self, 'list_imported_coil_files'):
+            self.list_imported_coil_files.blockSignals(False)
 
+        self._rt_bg_rebuild_needed = True
         self.atualizar_graficos_comparacao_bobinas()
+        if hasattr(self, 'tab_sub_caracterizacao') and self.tab_sub_caracterizacao.currentIndex() == 1:
+            self.atualizar_graficos_tempo_real_caracterizacao()
+        elif hasattr(self, 'tab_sub_caracterizacao') and self.tab_sub_caracterizacao.currentIndex() == 2:
+            self.atualizar_graficos_estatistica_caracterizacao()
+
         QtWidgets.QMessageBox.information(self, "Importação Concluída", f"{count_added} arquivo(s) carregado(s) com sucesso!")
 
     def limpar_comparacao_bobinas(self):
@@ -5848,8 +5880,16 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.txt_coil_report.setText("Aguardando carregamento de ensaios para gerar relatório comparativo...")
 
     def atualizar_todos_graficos_caracterizacao(self, *args):
+        self._rt_bg_rebuild_needed = True
         self.atualizar_graficos_comparacao_bobinas()
-        self.atualizar_graficos_estatistica_caracterizacao()
+        if hasattr(self, 'tab_sub_caracterizacao'):
+            idx = self.tab_sub_caracterizacao.currentIndex()
+            if idx == 1:
+                self.atualizar_graficos_tempo_real_caracterizacao(force_refresh=True)
+            elif idx == 2:
+                self.atualizar_graficos_estatistica_caracterizacao()
+        else:
+            self.atualizar_graficos_estatistica_caracterizacao()
 
     def atualizar_graficos_comparacao_bobinas(self):
         # Limpa plots
@@ -6074,19 +6114,181 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         if index == 0:
             self.atualizar_graficos_comparacao_bobinas()
         elif index == 1:
-            self.atualizar_graficos_tempo_real_caracterizacao()
+            self._rt_bg_rebuild_needed = True
+            self.atualizar_graficos_tempo_real_caracterizacao(force_refresh=True)
         elif index == 2:
             self.atualizar_graficos_estatistica_caracterizacao()
 
-    def atualizar_graficos_tempo_real_caracterizacao(self):
-        if not hasattr(self, 'plot_coil_rt_live'):
+    def atualizar_graficos_tempo_real_caracterizacao(self, force_refresh=False):
+        if not hasattr(self, 'plot_coil_rt_decay'):
             return
 
-        self.plot_coil_rt_live.clear()
-        self.plot_coil_rt_overlay.clear()
-        self.plot_coil_rt_residual.clear()
+        # Limite de taxa de atualização (FPS Limiter ~28 FPS / 35ms) para evitar sobrecarga da interface durante streaming serial contínuo
+        now = time.time()
+        last_update = getattr(self, '_last_rt_plot_time', 0.0)
+        if not force_refresh and (now - last_update) < 0.035:
+            return
+        self._last_rt_plot_time = now
 
-        # Plota os dados em tempo real coletados na aba principal (se existirem)
+        recs = getattr(self, 'loaded_coil_records', [])
+        selected_items = self.list_imported_coil_files.selectedItems() if hasattr(self, 'list_imported_coil_files') else []
+        if selected_items:
+            sel_recs = [item.data(QtCore.Qt.UserRole) for item in selected_items if item.data(QtCore.Qt.UserRole)]
+            if sel_recs:
+                recs = sel_recs
+
+        use_id_shading = hasattr(self, 'chk_diferenciar_ids_tonalidade') and self.chk_diferenciar_ids_tonalidade.isChecked()
+
+        # Verifica se os itens de fundo dos CSVs precisam ser reconstruídos
+        need_bg_rebuild = getattr(self, '_rt_bg_rebuild_needed', True)
+        if need_bg_rebuild:
+            self.plot_coil_rt_decay.clear()
+            self.plot_coil_rt_tau.clear()
+            self.plot_coil_rt_auc.clear()
+            self.plot_coil_rt_scatter.clear()
+            self._rt_live_curve = None
+            self._rt_ref_curve = None
+            self._rt_star_item = None
+            self._rt_tau_line = None
+            self._rt_auc_line = None
+            self._rt_tau_pt = None
+            self._rt_auc_pt = None
+
+            records_estat = []
+            for r in recs:
+                b_id = str(r.get("id_bobina", "N/A"))
+                d_val = float(r.get("distancia_mm", 0.0))
+                mat = str(r.get("material", "A36 Comum"))
+                cls_name = str(r.get("classe", "Saudável"))
+
+                all_t = r.get("all_taus", [r["tau"]])
+                all_a = r.get("all_aucs", [r["auc"]])
+                all_l = r.get("all_l_efetivas", [r["l_efetiva_uh"]])
+
+                n_pts = min(len(all_t), len(all_a), len(all_l))
+                for i in range(n_pts):
+                    id_samp = str(r.get("id_amostra", f"{i+1}"))
+                    records_estat.append({
+                        "id_bobina": b_id,
+                        "distancia_mm": d_val,
+                        "material": mat,
+                        "classe": cls_name,
+                        "tau": float(all_t[i]),
+                        "auc": float(all_a[i]),
+                        "l_efetiva_uh": float(all_l[i]),
+                        "id": id_samp,
+                        "curva": r.get("curva", []),
+                        "dt_us": r.get("dt_us", 0.1)
+                    })
+
+            if hasattr(self, 'coil_filter_checkboxes_material'):
+                mats_ok = [m for m, chk in self.coil_filter_checkboxes_material.items() if chk.isChecked()]
+                cls_map = {
+                    "Saudável": getattr(self, 'chk_coil_filter_saudavel', None),
+                    "Leve": getattr(self, 'chk_coil_filter_leve', None),
+                    "Moderada": getattr(self, 'chk_coil_filter_moderada', None),
+                    "Avançada": getattr(self, 'chk_coil_filter_avancada', None),
+                    "Corroído": getattr(self, 'chk_coil_filter_corroido', None),
+                    "Ar Livre": getattr(self, 'chk_coil_filter_ar_cls', None)
+                }
+                cls_ok = [c for c, chk in cls_map.items() if chk is None or chk.isChecked()]
+                records_estat = [a for a in records_estat if a["material"] in mats_ok and a["classe"] in cls_ok]
+
+            # Aplica Filtro de Outliers (IQR) por arquivo / ensaio individual se selecionado
+            if hasattr(self, 'chk_coil_filter_outliers') and self.chk_coil_filter_outliers.isChecked() and records_estat:
+                grupos_file = {}
+                for a in records_estat:
+                    file_key = (a.get("id_bobina"), a.get("material"), a.get("classe"), a.get("distancia_mm"))
+                    if file_key not in grupos_file:
+                        grupos_file[file_key] = []
+                    grupos_file[file_key].append(a)
+
+                records_limpos = []
+                for file_key, grupo in grupos_file.items():
+                    if len(grupo) >= 4:
+                        taus_g = [item["tau"] for item in grupo]
+                        aucs_g = [item["auc"] for item in grupo]
+                        q25_t, q75_t = np.percentile(taus_g, [25, 75])
+                        iqr_t = q75_t - q25_t
+                        q25_a, q75_a = np.percentile(aucs_g, [25, 75])
+                        iqr_a = q75_a - q25_a
+
+                        for item in grupo:
+                            is_ok_t = (q25_t - 1.5 * iqr_t <= item["tau"] <= q75_t + 1.5 * iqr_t)
+                            is_ok_a = (q25_a - 1.5 * iqr_a <= item["auc"] <= q75_a + 1.5 * iqr_a)
+                            if is_ok_t and is_ok_a:
+                                records_limpos.append(item)
+                    else:
+                        records_limpos.extend(grupo)
+
+                records_estat = records_limpos
+
+            self.records_rt_caracterizacao = records_estat
+
+            if records_estat:
+                ids_unicos = sorted(list(set([str(a["id"]) for a in records_estat])))
+                num_ids = len(ids_unicos)
+                id_to_lightness = {id_v: (0.35 + 0.50 * (i / max(1, num_ids - 1)) if num_ids > 1 else 0.55) for i, id_v in enumerate(ids_unicos)}
+
+                for a_item in records_estat:
+                    cor_base = obter_cor_classe(a_item["classe"])
+                    simbolo = obter_simbolo_material(a_item["material"])
+                    a_item["symbol"] = simbolo
+
+                    base_qcol = QtGui.QColor(cor_base)
+                    if use_id_shading:
+                        h, s, l_val, a_alpha = base_qcol.getHslF()
+                        target_l = id_to_lightness.get(str(a_item["id"]), 0.55)
+                        adj_qcol = QtGui.QColor.fromHslF(h, min(1.0, s * 1.05), max(0.25, min(0.90, target_l)))
+                        a_item["color_hex"] = adj_qcol.name()
+                        a_item["brush"] = pg.mkBrush(adj_qcol)
+                    else:
+                        a_item["color_hex"] = cor_base
+                        a_item["brush"] = pg.mkBrush(base_qcol)
+
+                for idx, r in enumerate(recs):
+                    cor_base_hex = obter_cor_classe(r.get("classe", "Saudável"))
+                    if use_id_shading and recs:
+                        base_qcol = QtGui.QColor(cor_base_hex)
+                        h, s, l_val, a_alpha = base_qcol.getHslF()
+                        target_l = id_to_lightness.get(str(r.get("id_amostra", r.get("filename", ""))), 0.55) if 'id_to_lightness' in locals() else 0.55
+                        cor_hex = QtGui.QColor.fromHslF(h, min(1.0, s * 1.05), max(0.25, min(0.90, target_l))).name()
+                    else:
+                        cor_hex = cor_base_hex
+
+                    estilo = obter_estilo_material(r.get("material", "A36 Comum"))
+                    t_us = np.arange(len(r["curva"])) * r.get("dt_us", 0.1)
+                    pen = pg.mkPen(color=cor_hex, width=1.5, style=estilo)
+                    curve_st = self.plot_coil_rt_decay.plot(
+                        t_us, r["curva"], pen=pen,
+                        name=f"B.{r.get('id_bobina','')} ({r.get('distancia_mm',0)}mm, {r.get('material','')})"
+                    )
+                    curve_st.rec_data = r
+
+                grupos_scatter = {}
+                for a in records_estat:
+                    d_val = a["distancia_mm"]
+                    t_val = a["tau"]
+                    a_val = a["auc"]
+                    simb = a.get("symbol", "o")
+                    color_hex = a.get("color_hex", "#3498db")
+
+                    grp_key = (simb, color_hex)
+                    if grp_key not in grupos_scatter:
+                        grupos_scatter[grp_key] = {"d": [], "t": [], "a": [], "brush": a.get("brush", pg.mkBrush(color_hex))}
+                    grupos_scatter[grp_key]["d"].append(d_val)
+                    grupos_scatter[grp_key]["t"].append(t_val)
+                    grupos_scatter[grp_key]["a"].append(a_val)
+
+                for (simb, _), data in grupos_scatter.items():
+                    b_pt = data["brush"]
+                    self.plot_coil_rt_tau.addItem(pg.ScatterPlotItem(x=data["d"], y=data["t"], symbol=simb, size=7, brush=b_pt, pen=pg.mkPen('w', width=0.2)))
+                    self.plot_coil_rt_auc.addItem(pg.ScatterPlotItem(x=data["d"], y=data["a"], symbol=simb, size=7, brush=b_pt, pen=pg.mkPen('w', width=0.2)))
+                    self.plot_coil_rt_scatter.addItem(pg.ScatterPlotItem(x=data["t"], y=data["a"], symbol=simb, size=8, brush=b_pt, pen=pg.mkPen('w', width=0.2)))
+
+            self._rt_bg_rebuild_needed = False
+
+        # 2. Atualizar Overlays em TEMPO REAL (Alta Performance via setData/setValue)
         t = None
         v = None
         is_live_stream = False
@@ -6095,8 +6297,8 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             t = np.array(self.tempo_us)
             v = np.array(self.tensao_mv)
             is_live_stream = True
-        elif hasattr(self, 'loaded_coil_records') and self.loaded_coil_records:
-            rec_fall = self.loaded_coil_records[0]
+        elif recs:
+            rec_fall = recs[0]
             curva_raw = rec_fall.get("curva", [])
             dt_raw = rec_fall.get("dt_us", getattr(self, 'dt_us', 0.1))
             if len(curva_raw) > 0:
@@ -6104,29 +6306,27 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 v = np.array(curva_raw)
 
         if t is not None and v is not None and len(t) > 0:
-            # Plot 1: Osciloscópio Live
-            pen_live = pg.mkPen(color='#00e676', width=2.0)
-            title_live = "Sinal Medido em Tempo Real (Osciloscópio Live)" if is_live_stream else "Sinal de Ensaio Carregado (Simulação Live)"
-            c1 = self.plot_coil_rt_live.plot(t, v, pen=pen_live, name=title_live)
-            c1.curve_title = title_live
+            # Curva Medida Live (Verde Neon)
+            if not hasattr(self, '_rt_live_curve') or self._rt_live_curve is None or self._rt_live_curve not in self.plot_coil_rt_decay.items:
+                pen_live = pg.mkPen(color='#00ff00', width=3.2)
+                title_live = "Sinal Medido em Tempo Real (Osciloscópio Live)" if is_live_stream else "Sinal de Ensaio Carregado (Simulação Live)"
+                self._rt_live_curve = self.plot_coil_rt_decay.plot(t, v, pen=pen_live, name=title_live)
+                self._rt_live_curve.curve_title = title_live
+            else:
+                self._rt_live_curve.setData(t, v)
 
-            # Plot 2: Sobreposição Live vs Curva de Referência do Sensor Ativo
-            c2 = self.plot_coil_rt_overlay.plot(t, v, pen=pen_live, name="Live")
-            c2.curve_title = "Sinal Medido Live"
-
-            # Busca curva de referência da bobina ativa se houver registros carregados
             active_info = getattr(self, 'active_coil_info', {})
             active_id = active_info.get("id", "681")
             
             ref_curve = None
             ref_rec = None
-            if hasattr(self, 'loaded_coil_records') and self.loaded_coil_records:
-                matches = [r for r in self.loaded_coil_records if str(r.get("id_bobina", "")) == str(active_id)]
+            if recs:
+                matches = [r for r in recs if str(r.get("id_bobina", "")) == str(active_id)]
                 if matches:
                     ref_rec = matches[0]
                     ref_curve = ref_rec.get("curva", None)
                 else:
-                    ref_rec = self.loaded_coil_records[0]
+                    ref_rec = recs[0]
                     ref_curve = ref_rec.get("curva", None)
 
             if ref_curve is not None:
@@ -6135,32 +6335,95 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                 v_live_sub = v[:n_pts]
                 v_ref_sub = np.array(ref_curve[:n_pts])
 
-                mat_ref = ref_rec.get("material", "A36 Comum") if ref_rec else self.obter_material_selecionado()
-                estilo_ref = obter_estilo_material(mat_ref)
-                pen_ref = pg.mkPen(color='#29b6f6', width=2.0, style=estilo_ref)
-                c3 = self.plot_coil_rt_overlay.plot(t_sub, v_ref_sub, pen=pen_ref, name=f"Ref. B.{active_id}")
-                c3.curve_title = f"Curva de Referência do Sensor B.{active_id}"
+                # Curva Referência (Azul)
+                if not hasattr(self, '_rt_ref_curve') or self._rt_ref_curve is None or self._rt_ref_curve not in self.plot_coil_rt_decay.items:
+                    mat_ref = ref_rec.get("material", "A36 Comum") if ref_rec else self.obter_material_selecionado()
+                    estilo_ref = obter_estilo_material(mat_ref)
+                    pen_ref = pg.mkPen(color='#29b6f6', width=2.2, style=estilo_ref)
+                    self._rt_ref_curve = self.plot_coil_rt_decay.plot(t_sub, v_ref_sub, pen=pen_ref, name=f"Ref. B.{active_id}")
+                    self._rt_ref_curve.curve_title = f"Curva de Referência do Sensor B.{active_id}"
+                else:
+                    self._rt_ref_curve.setData(t_sub, v_ref_sub)
                 if ref_rec:
-                    c3.rec_data = ref_rec
+                    self._rt_ref_curve.rec_data = ref_rec
 
-                # Plot 3: Sinal Residual Delta V(t)
-                delta_v = v_live_sub - v_ref_sub
-                pen_res = pg.mkPen(color='#f1c40f', width=1.5)
-                c4 = self.plot_coil_rt_residual.plot(t_sub, delta_v, pen=pen_res, name="Delta V(t)")
-                c4.curve_title = "Sinal Residual Delta V(t) [Medido - Referência]"
-                
-                rms_err = float(np.sqrt(np.mean(delta_v**2)))
+                rms_err = float(np.sqrt(np.mean((v_live_sub - v_ref_sub)**2)))
                 status_txt = "<b style='color:#00e676;'>ESTÁVEL (Conforme Ref.)</b>" if rms_err < 150 else "<b style='color:#e74c3c;'>ATENÇÃO: Desvio Térmico / Alinhamento</b>"
                 fonte_txt = "Transmissão Serial USB/COM Ativa em Tempo Real" if is_live_stream else "Sinal de Ensaio CSV Carregado (Modo Offline / Demonstração)"
 
-                self.txt_coil_rt_report.setHtml(
-                    f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
-                    f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')})<br>"
-                    f"<b>Fonte do Sinal:</b> {fonte_txt}<br>"
-                    f"<b>Desvio Médio RMS (Resíduo):</b> {rms_err:.2f} ADC Counts<br>"
-                    f"<b>Status de Estabilidade:</b> {status_txt}<br>"
-                    f"<small style='color:#a0a0a0;'>Gráficos atualizados continuamente via interface de aquisição USB/COM.</small>"
-                )
+                live_tau = getattr(self, 'last_tau', 0.0)
+                live_auc = getattr(self, 'last_auc', 0.0)
+                d_liftoff = round(getattr(self, 'distancia_lift_off', self.spin_liftoff_dist.value() if hasattr(self, 'spin_liftoff_dist') else 0.0), 2)
+
+                # Converte o Lift-Off para a escala do gráfico e encaixa na distância exata gravada nos CSVs
+                recs_check = getattr(self, 'loaded_coil_records', [])
+                has_large_dists = any(float(r.get("distancia_mm", 0.0)) > 10.0 for r in recs_check)
+                if has_large_dists and d_liftoff < 10.0:
+                    d_liftoff_plot = round(d_liftoff * 1000.0, 1)
+                else:
+                    d_liftoff_plot = d_liftoff
+
+                # Snap de precisão para bater exatamente com a coordenada do arquivo CSV se a diferença for imperceptível (< 0.5 um / < 0.05 mm)
+                if recs_check:
+                    for r in recs_check:
+                        d_r = float(r.get("distancia_mm", 0.0))
+                        d_r_scaled = d_r if (d_r > 10.0 or not has_large_dists) else d_r * 1000.0
+                        if abs(d_r_scaled - d_liftoff_plot) < 0.5:
+                            d_liftoff_plot = d_r_scaled
+                            break
+
+                # Se last_tau/last_auc não estiverem definidos na simulação, calcula na hora a partir do sinal
+                if (live_tau <= 0 or live_auc <= 0) and v is not None and len(v) > 10:
+                    dt_u = getattr(self, 'dt_us', 0.1)
+                    live_tau, live_auc = calcular_tau_e_auc(v, dt_u)
+
+                # Overlays Live nas distribuições Tau, AUC e Scatter
+                if live_tau > 0:
+                    if not hasattr(self, '_rt_tau_line') or self._rt_tau_line is None or self._rt_tau_line not in self.plot_coil_rt_tau.items:
+                        self._rt_tau_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('#ffff00', width=1.5, style=QtCore.Qt.DashLine))
+                        self.plot_coil_rt_tau.addItem(self._rt_tau_line)
+                        self._rt_tau_pt = pg.ScatterPlotItem(x=[d_liftoff_plot], y=[live_tau], symbol='star', size=16, brush=pg.mkBrush('#f1c40f'), pen=pg.mkPen('w', width=1.5))
+                        self.plot_coil_rt_tau.addItem(self._rt_tau_pt)
+                    else:
+                        self._rt_tau_line.setValue(live_tau)
+                        self._rt_tau_pt.setData(x=[d_liftoff_plot], y=[live_tau])
+
+                if live_auc > 0:
+                    if not hasattr(self, '_rt_auc_line') or self._rt_auc_line is None or self._rt_auc_line not in self.plot_coil_rt_auc.items:
+                        self._rt_auc_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('#ffff00', width=1.5, style=QtCore.Qt.DashLine))
+                        self.plot_coil_rt_auc.addItem(self._rt_auc_line)
+                        self._rt_auc_pt = pg.ScatterPlotItem(x=[d_liftoff_plot], y=[live_auc], symbol='star', size=16, brush=pg.mkBrush('#f1c40f'), pen=pg.mkPen('w', width=1.5))
+                        self.plot_coil_rt_auc.addItem(self._rt_auc_pt)
+                    else:
+                        self._rt_auc_line.setValue(live_auc)
+                        self._rt_auc_pt.setData(x=[d_liftoff_plot], y=[live_auc])
+
+                if live_tau > 0 and live_auc > 0:
+                    # ESTRELA AMARELA NEON MOVEL EM TEMPO REAL NO ESPAÇO DE CARACTERÍSTICAS
+                    if not hasattr(self, '_rt_star_item') or self._rt_star_item is None or self._rt_star_item not in self.plot_coil_rt_scatter.items:
+                        self._rt_star_item = pg.ScatterPlotItem(
+                            x=[live_tau], y=[live_auc],
+                            symbol='star', size=20,
+                            brush=pg.mkBrush('#f1c40f'),
+                            pen=pg.mkPen('#ffffff', width=2.0)
+                        )
+                        self.plot_coil_rt_scatter.addItem(self._rt_star_item)
+                    else:
+                        self._rt_star_item.setData(x=[live_tau], y=[live_auc])
+
+                # Atualiza o painel de relatório em HTML em taxa reduzida (4 FPS / 250ms) para evitar reflows de texto no Qt
+                last_html_time = getattr(self, '_last_rt_html_time', 0.0)
+                if force_refresh or (now - last_html_time) > 0.25:
+                    self._last_rt_html_time = now
+                    self.txt_coil_rt_report.setHtml(
+                        f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
+                        f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')}) | <b>Lift-Off Atual:</b> {d_liftoff:.2f} mm<br>"
+                        f"<b>Fonte do Sinal:</b> {fonte_txt}<br>"
+                        f"<b>Medições Live:</b> Tau = {self.formatar_valor_tempo(live_tau)} | AUC = {live_auc:.1f}<br>"
+                        f"<b>Desvio Médio RMS (Resíduo):</b> {rms_err:.2f} ADC Counts<br>"
+                        f"<b>Status de Estabilidade:</b> {status_txt}<br>"
+                        f"<small style='color:#a0a0a0;'>Gráficos e marcadores ativos ★ atualizados continuamente via interface USB/COM.</small>"
+                    )
             else:
                 self.txt_coil_rt_report.setHtml(
                     f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
@@ -6178,59 +6441,124 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
 
     def ao_mover_mouse_grafico_rt_caracterizacao(self, pos):
         if not self.is_tooltip_enabled():
+            self.atualizar_destaque_visual_hover(target_plot=None)
             return
         if not hasattr(self, 'win_coil_rt_plots'):
             return
 
+        # Limite de taxa do mouse (FPS Limiter ~30 FPS / 30ms) para evitar congelamento da GUI durante o movimento contínuo do cursor
+        now = time.time()
+        last_mouse = getattr(self, '_last_rt_mouse_time', 0.0)
+        if (now - last_mouse) < 0.030:
+            return
+        self._last_rt_mouse_time = now
+
         plots = [
-            self.plot_coil_rt_live,
-            self.plot_coil_rt_overlay,
-            self.plot_coil_rt_residual
+            self.plot_coil_rt_decay,
+            self.plot_coil_rt_tau,
+            self.plot_coil_rt_auc,
+            self.plot_coil_rt_scatter
         ]
 
         melhor_item = None
-        hover_coords = None
-        hover_pt = None
+        melhor_plot = None
+        melhor_pt_x = None
+        melhor_pt_y = None
+        hover_decay_pt = None
+        hover_decay_coords = None
+        menor_dist_norm = float('inf')
         menor_dist_px = float('inf')
-        target_plot = None
+        rec_list = getattr(self, 'records_rt_caracterizacao', [])
 
         for plot_item in plots:
             vb = plot_item.vb
             if vb.sceneBoundingRect().contains(pos):
-                mouse_pt = vb.mapSceneToView(pos)
-                for item in plot_item.items:
-                    if isinstance(item, pg.PlotDataItem) and item.xData is not None and item.yData is not None:
-                        dist_px, pt_coord = self.calcular_distancia_pixel_curva(vb, item, pos)
-                        if dist_px < 25.0 and dist_px < menor_dist_px:
-                            menor_dist_px = dist_px
+                if plot_item == self.plot_coil_rt_decay:
+                    for item in plot_item.items:
+                        if isinstance(item, pg.PlotDataItem) and item.xData is not None and item.yData is not None:
+                            dist_px, pt_coord = self.calcular_distancia_pixel_curva(vb, item, pos)
+                            if dist_px < 25.0 and dist_px < menor_dist_px:
+                                menor_dist_px = dist_px
+                                melhor_item = item
+                                hover_decay_pt = pt_coord
+                                hover_decay_coords = (item.xData, item.yData)
+                                melhor_plot = plot_item
+                else:
+                    mouse_view_pt = vb.mapSceneToView(pos)
+                    mx, my = mouse_view_pt.x(), mouse_view_pt.y()
+                    vr = vb.viewRect()
+                    rw, rh = vr.width(), vr.height()
+                    if rw <= 0 or rh <= 0:
+                        break
+
+                    for item in rec_list:
+                        d_val = item["distancia_mm"]
+                        tau_val = item["tau"]
+                        auc_val = item["auc"]
+
+                        if plot_item == self.plot_coil_rt_tau:
+                            pt_x, pt_y = d_val, tau_val
+                        elif plot_item == self.plot_coil_rt_auc:
+                            pt_x, pt_y = d_val, auc_val
+                        elif plot_item == self.plot_coil_rt_scatter:
+                            pt_x, pt_y = tau_val, auc_val
+                        else:
+                            continue
+
+                        norm_dx = (pt_x - mx) / rw
+                        norm_dy = (pt_y - my) / rh
+                        dist_norm = norm_dx * norm_dx + norm_dy * norm_dy
+
+                        if dist_norm < 0.002 and dist_norm < menor_dist_norm:
+                            menor_dist_norm = dist_norm
                             melhor_item = item
-                            hover_coords = (item.xData, item.yData)
-                            hover_pt = pt_coord
-                            target_plot = plot_item
+                            melhor_plot = plot_item
+                            melhor_pt_x, melhor_pt_y = pt_x, pt_y
                 break
 
-        if melhor_item and target_plot:
-            self.atualizar_destaque_visual_hover(target_plot=target_plot, line_coords=hover_coords)
-            title = getattr(melhor_item, 'curve_title', melhor_item.name or "Sinal em Tempo Real")
-            mat_sel = self.obter_material_selecionado()
-            cls_sel = self.obter_classe_selecionada()
-            active_info = getattr(self, 'active_coil_info', {})
-            active_id = active_info.get("id", "681")
+        if melhor_item:
+            if hover_decay_coords is not None:
+                self.atualizar_destaque_visual_hover(target_plot=melhor_plot, line_coords=hover_decay_coords)
+                title = getattr(melhor_item, 'curve_title', melhor_item.name or "Sinal em Tempo Real")
+                mat_sel = self.obter_material_selecionado()
+                cls_sel = self.obter_classe_selecionada()
+                active_info = getattr(self, 'active_coil_info', {})
+                active_id = active_info.get("id", "681")
 
-            rec_ref = getattr(melhor_item, 'rec_data', None)
-            filename_ref = rec_ref.get("filename", "Sinal Live USB/COM") if rec_ref else "Sinal Live USB/COM"
-            mat_ref = rec_ref.get("material", mat_sel) if rec_ref else mat_sel
-            cls_ref = rec_ref.get("classe", cls_sel) if rec_ref else cls_sel
+                rec_ref = getattr(melhor_item, 'rec_data', None)
+                filename_ref = rec_ref.get("filename", "Sinal Live USB/COM") if rec_ref else "Sinal Live USB/COM"
+                mat_ref = rec_ref.get("material", mat_sel) if rec_ref else mat_sel
+                cls_ref = rec_ref.get("classe", cls_sel) if rec_ref else cls_sel
 
-            tooltip_text = (
-                f"📈 <b>{title}</b><br>"
-                f"📁 <b>Referência de Arquivo:</b> {filename_ref}<br>"
-                f"🛡️ <b>Material:</b> {mat_ref}<br>"
-                f"📊 <b>Estado / Classe de Corrosão:</b> {cls_ref.capitalize()}<br>"
-                f"🧲 <b>Bobina Ativa:</b> ID {active_id}<br>"
-                f"⏱️ <b>Ponto Cursor:</b> t = {hover_pt[0]:.1f} &mu;s | Amplitude V(t) = {hover_pt[1]:.1f} counts"
-            )
-            self.floating_tooltip.exibir_hover(QtGui.QCursor.pos(), tooltip_text, target_plot=target_plot)
+                tooltip_text = (
+                    f"📈 <b>{title}</b><br>"
+                    f"📁 <b>Referência de Arquivo:</b> {filename_ref}<br>"
+                    f"🛡️ <b>Material:</b> {mat_ref}<br>"
+                    f"📊 <b>Estado / Classe de Corrosão:</b> {cls_ref.capitalize()}<br>"
+                    f"🧲 <b>Bobina Ativa:</b> ID {active_id}<br>"
+                    f"⏱️ <b>Ponto Cursor:</b> X = {hover_decay_pt[0]:.1f} | Amplitude Y = {hover_decay_pt[1]:.1f}"
+                )
+                self.floating_tooltip.exibir_hover(QtGui.QCursor.pos(), tooltip_text, target_plot=melhor_plot)
+            elif melhor_plot is not None and melhor_pt_x is not None:
+                simb = obter_simbolo_material(melhor_item.get("material"))
+                self.atualizar_destaque_visual_hover(target_plot=melhor_plot, pt_coords=(melhor_pt_x, melhor_pt_y), symbol=simb)
+                b_id = melhor_item.get("id_bobina", "N/A")
+                mat_str = melhor_item.get("material", "A36 Comum")
+                cls_str = melhor_item.get("classe", "Saudável")
+                d_dist = melhor_item.get("distancia_mm", 0.0)
+                t_val = melhor_item.get("tau", 0.0)
+                a_val = melhor_item.get("auc", 0.0)
+                samp_id = melhor_item.get("id", "1")
+
+                tooltip_text = (
+                    f"🎯 <b>Ponto de Amostra ID {samp_id} (Histórico CSV)</b><br>"
+                    f"🧲 <b>Bobina:</b> ID {b_id} | 🛡️ <b>Material:</b> {mat_str}<br>"
+                    f"📊 <b>Estado:</b> {cls_str}<br>"
+                    f"📏 <b>Lift-Off:</b> {d_dist:.2f} mm ({d_dist:.0f} µm)<br>"
+                    f"⏱️ <b>Tau (&tau;):</b> {self.formatar_valor_tempo(t_val)}<br>"
+                    f"📐 <b>AUC:</b> {a_val:.1f} Counts.µs"
+                )
+                self.floating_tooltip.exibir_hover(QtGui.QCursor.pos(), tooltip_text, target_plot=melhor_plot)
         else:
             self.atualizar_destaque_visual_hover(target_plot=None)
 
@@ -6420,6 +6748,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         if not hasattr(self, 'records_estatistica_caracterizacao') or not self.records_estatistica_caracterizacao:
             return
 
+        # Limite de taxa do mouse (FPS Limiter ~30 FPS / 30ms)
+        now = time.time()
+        last_mouse = getattr(self, '_last_st_mouse_time', 0.0)
+        if (now - last_mouse) < 0.030:
+            return
+        self._last_st_mouse_time = now
+
         plots = [
             self.plot_coil_st_decay,
             self.plot_coil_st_tau,
@@ -6432,6 +6767,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         melhor_pt_x, melhor_pt_y = None, None
         hover_decay_pt = None
         hover_decay_coords = None
+        menor_dist_norm = float('inf')
         menor_dist_px = float('inf')
 
         for plot_item in plots:
@@ -6448,6 +6784,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                                 hover_decay_pt = pt_coord
                                 hover_decay_coords = (item.xData, item.yData)
                 else:
+                    mouse_view_pt = vb.mapSceneToView(pos)
+                    mx, my = mouse_view_pt.x(), mouse_view_pt.y()
+                    vr = vb.viewRect()
+                    rw, rh = vr.width(), vr.height()
+                    if rw <= 0 or rh <= 0:
+                        break
+
                     for item in self.records_estatistica_caracterizacao:
                         d_val = item["distancia_mm"]
                         tau_val = item["tau"]
@@ -6462,11 +6805,12 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
                         else:
                             continue
 
-                        pt_pixel = vb.mapViewToScene(pg.Point(pt_x, pt_y))
-                        dist_px = np.hypot(pos.x() - pt_pixel.x(), pos.y() - pt_pixel.y())
+                        norm_dx = (pt_x - mx) / rw
+                        norm_dy = (pt_y - my) / rh
+                        dist_norm = norm_dx * norm_dx + norm_dy * norm_dy
 
-                        if dist_px < 22.0 and dist_px < menor_dist_px:
-                            menor_dist_px = dist_px
+                        if dist_norm < 0.002 and dist_norm < menor_dist_norm:
+                            menor_dist_norm = dist_norm
                             melhor_item = item
                             melhor_plot = plot_item
                             melhor_pt_x, melhor_pt_y = pt_x, pt_y

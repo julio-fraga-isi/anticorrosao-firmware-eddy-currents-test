@@ -49,7 +49,7 @@ def calcular_tau_e_auc(valores, dt_us):
     Calcula a área sob a curva (AUC) e a constante de tempo (Tau) de decaimento
     para um transitório indutivo.
     """
-    if not valores or len(valores) == 0:
+    if valores is None or len(valores) == 0:
         return 0.0, 0.0
         
     valores_arr = np.array(valores)
