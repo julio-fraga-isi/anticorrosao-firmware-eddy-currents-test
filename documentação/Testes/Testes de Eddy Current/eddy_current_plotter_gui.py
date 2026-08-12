@@ -6481,8 +6481,6 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                         f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')}) | <b>Lift-Off Atual:</b> {d_liftoff:.2f} mm<br>"
                         f"<b>Fonte do Sinal:</b> {fonte_txt}<br>"
                         f"<b>Medições Live:</b> Tau = {self.formatar_valor_tempo(live_tau)} | AUC = {live_auc:.1f}<br>"
-                        f"<b>Desvio Médio RMS (Resíduo):</b> {rms_err:.2f} ADC Counts<br>"
-                        f"<b>Status de Estabilidade:</b> {status_txt}<br>"
                         f"<small style='color:#a0a0a0;'>Gráficos e marcadores ativos ★ atualizados continuamente via interface USB/COM.</small>"
                     )
             else:
