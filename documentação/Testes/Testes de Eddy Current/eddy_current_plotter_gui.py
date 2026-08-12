@@ -321,7 +321,7 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         self.box_frame.setMinimumSize(0, 0)
 
     def minimumSizeHint(self):
-        return QtCore.QSize(10, 10)
+        return QtCore.QSize(1, 1)
 
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
@@ -333,13 +333,17 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
 
     def set_content(self, html_text):
         self.lbl_content.setText(html_text)
+        self.layout_main.activate()
         self.adjustSize()
 
     def move_safe(self, pos_global):
+        self.layout_main.activate()
         self.adjustSize()
+        hint = self.sizeHint()
+        w = max(hint.width(), self.width())
+        h = max(hint.height(), self.height())
+
         screen = QtWidgets.QApplication.desktop().availableGeometry(pos_global)
-        w = self.width()
-        h = self.height()
         
         x = pos_global.x() + 15
         y = pos_global.y() + 15
@@ -352,7 +356,7 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         x = max(screen.left(), min(x, screen.right() - w))
         y = max(screen.top(), min(y, screen.bottom() - h))
 
-        self.move(int(x), int(y))
+        self.setGeometry(int(x), int(y), int(w), int(h))
 
     def exibir_hover(self, pos_global, html_text, target_plot=None):
         if self.is_pinned:
@@ -389,6 +393,7 @@ class CustomFloatingTooltipWidget(QtWidgets.QFrame):
         if pos_global:
             self.move_safe(pos_global)
         else:
+            self.layout_main.activate()
             self.adjustSize()
         self.show()
 
