@@ -130,10 +130,10 @@ class DatasetManager:
             with open(filepath, "a", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f, delimiter=";")
                 if escrever_cabecalho:
-                    cabecalho = ["id_amostra", "material", "classe", "timestamp", "dt_us"] + [f"p_{i}" for i in range(256)]
+                    cabecalho = ["id_amostra", "material", "classe", "timestamp", "dt_us", "tau_us", "auc_counts"] + [f"p_{i}" for i in range(256)]
                     writer.writerow(cabecalho)
                 
-                linha = [id_amostra, material, classe, timestamp, f"{dt_us:.5f}"] + [str(x) for x in curva]
+                linha = [id_amostra, material, classe, timestamp, f"{dt_us:.5f}", f"{tau:.4f}", f"{auc:.2f}"] + [str(x) for x in curva]
                 writer.writerow(linha)
         except Exception as e:
             raise e

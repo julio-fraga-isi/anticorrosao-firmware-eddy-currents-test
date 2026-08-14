@@ -327,12 +327,14 @@ class CoilCharacterizationManager:
         header = [
             "id_amostra", "base", "local", "id_bobina", "indutancia_uh", "resistencia_ohm",
             "diametro_mm", "altura_mm", "espiras", "fio_awg", "nucleo",
-            "distancia_mm", "ajuste_manual_liftoff", "material", "classe", "timestamp", "dt_us"
+            "distancia_mm", "ajuste_manual_liftoff", "material", "classe", "timestamp", "dt_us",
+            "tau_us", "auc_counts"
         ] + [f"p_{i}" for i in range(256)]
 
         rows = []
         for idx, single_curve in enumerate(curves_list):
             sample_label = f"{id_amostra}_{idx+1}" if len(curves_list) > 1 else str(id_amostra)
+            tau_val, auc_val = calcular_tau_e_auc(single_curve, dt_us)
             row = [
                 sample_label,
                 base,
@@ -350,7 +352,9 @@ class CoilCharacterizationManager:
                 material,
                 classe,
                 timestamp,
-                f"{dt_us:.5f}"
+                f"{dt_us:.5f}",
+                f"{tau_val:.4f}",
+                f"{auc_val:.2f}"
             ] + [str(int(round(x))) for x in single_curve]
             rows.append(row)
 

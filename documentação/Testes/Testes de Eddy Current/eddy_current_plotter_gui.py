@@ -6512,18 +6512,15 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
             last_html_time = getattr(self, '_last_rt_html_time', 0.0)
             if force_refresh or (now - last_html_time) > 0.25:
                 self._last_rt_html_time = now
+                active_info = self.obter_especificacoes_bobina_atuais()
+                active_id = active_info.get("id", "681")
+                n_pts = len(v) if v is not None else 0
                 self.txt_coil_rt_report.setHtml(
                     f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
-                    f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')}) | <b>Lift-Off Atual:</b> {d_liftoff:.2f} mm<br>"
+                    f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')}) | <b>Lift-Off Atual:</b> {d_liftoff:.2f} mm | <b>Sinal:</b> {n_pts} pontos<br>"
                     f"<b>Fonte do Sinal:</b> {fonte_txt}<br>"
                     f"<b>Medições Live:</b> Tau = {self.formatar_valor_tempo(live_tau)} | AUC = {live_auc:.1f}<br>"
                     f"<small style='color:#a0a0a0;'>Gráficos e marcadores ativos ★ atualizados continuamente via interface USB/COM.</small>"
-                )
-            else:
-                self.txt_coil_rt_report.setHtml(
-                    f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
-                    f"<b>Sinal Live Capturado:</b> {len(v)} pontos de amostragem.<br>"
-                    f"<small style='color:#a0a0a0;'>Importe ou grave um ensaio de caracterização para habilitação da curva de referência e cálculo de resíduo Delta V(t).</small>"
                 )
         else:
             self.txt_coil_rt_report.setHtml(
