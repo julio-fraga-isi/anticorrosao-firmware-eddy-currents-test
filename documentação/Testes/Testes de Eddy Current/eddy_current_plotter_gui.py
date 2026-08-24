@@ -89,6 +89,483 @@ def obter_estilo_material(mat_nome):
     return QtCore.Qt.SolidLine
 
 
+class FloatingFilterHUD(QtWidgets.QFrame):
+    """
+    Menu Suspenso Flutuante para Modo Tela Cheia:
+    - Arrastável livremente sobre os gráficos.
+    - Expansível e recolhível ao clicar na barra de título.
+    - Contém os filtros de materiais, classes, opções visuais, estabilidade e taxa de atualização.
+    """
+    def __init__(self, main_gui=None, parent=None):
+        super().__init__(parent)
+        self.main_gui = main_gui
+        self.is_collapsed = False
+        self._is_dragging = False
+        self._drag_pos = QtCore.QPoint()
+        self._drag_start_pos = QtCore.QPoint()
+
+        self.setObjectName("FloatingHUD")
+        self.setStyleSheet("""
+            QFrame#FloatingHUD {
+                background-color: rgba(20, 20, 26, 0.95);
+                border: 1.5px solid #00e5ff;
+                border-radius: 8px;
+                color: #ffffff;
+            }
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #1a1a22;
+                width: 8px;
+                margin: 2px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #00e5ff;
+                min-height: 24px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #33ebff;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
+            }
+        """)
+
+        # Efeito de Sombra Moderna Neon
+        shadow = QtWidgets.QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(24)
+        shadow.setColor(QtGui.QColor(0, 229, 255, 90))
+        shadow.setOffset(0, 4)
+        self.setGraphicsEffect(shadow)
+
+        self.setFixedSize(350, 520)
+
+        # Layout Principal
+        self.layout_main = QtWidgets.QVBoxLayout(self)
+        self.layout_main.setContentsMargins(0, 0, 0, 0)
+        self.layout_main.setSpacing(0)
+
+        # 1. Barra de Título (Header) Arrastável e Clicável
+        self.header_frame = QtWidgets.QFrame(self)
+        self.header_frame.setFixedHeight(40)
+        self.header_frame.setCursor(QtCore.Qt.PointingHandCursor)
+        self.header_frame.setStyleSheet("""
+            QFrame {
+                background-color: rgba(30, 30, 40, 0.98);
+                border-top-left-radius: 7px;
+                border-top-right-radius: 7px;
+                border-bottom: 1px solid #3a3a3c;
+            }
+            QFrame:hover {
+                background-color: rgba(42, 42, 56, 0.98);
+            }
+        """)
+        self.header_layout = QtWidgets.QHBoxLayout(self.header_frame)
+        self.header_layout.setContentsMargins(10, 4, 10, 4)
+        self.header_layout.setSpacing(6)
+
+        self.lbl_hud_icon = QtWidgets.QLabel("🎛️")
+        self.lbl_hud_icon.setStyleSheet("font-size: 11pt; background: transparent;")
+
+        self.lbl_hud_title = QtWidgets.QLabel("<b>Filtros de Exibição</b>")
+        self.lbl_hud_title.setStyleSheet("color: #00e5ff; font-size: 9.5pt; font-family: 'Segoe UI'; background: transparent;")
+
+        self.lbl_hud_hint = QtWidgets.QLabel("<small style='color:#a0a0a0;'>(Clique p/ recolher)</small>")
+        self.lbl_hud_hint.setStyleSheet("background: transparent;")
+
+        self.btn_toggle_collapse = QtWidgets.QPushButton("▲")
+        self.btn_toggle_collapse.setFixedSize(24, 24)
+        self.btn_toggle_collapse.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_toggle_collapse.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a36; color: #00e5ff; border: 1px solid #00e5ff;
+                border-radius: 4px; font-weight: bold; font-size: 8.5pt;
+            }
+            QPushButton:hover {
+                background-color: #00e5ff; color: #121214;
+            }
+        """)
+        self.btn_toggle_collapse.clicked.connect(self.toggle_collapsed)
+
+        self.header_layout.addWidget(self.lbl_hud_icon)
+        self.header_layout.addWidget(self.lbl_hud_title)
+        self.header_layout.addWidget(self.lbl_hud_hint)
+        self.header_layout.addStretch()
+        self.header_layout.addWidget(self.btn_toggle_collapse)
+
+        self.layout_main.addWidget(self.header_frame)
+
+        # 2. Área de Conteúdo dos Filtros (Scrollable)
+        self.scroll_content = QtWidgets.QScrollArea(self)
+        self.scroll_content.setWidgetResizable(True)
+        self.scroll_content.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self.scroll_content.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.scroll_content.setFixedHeight(476)
+
+        self.content_widget = QtWidgets.QWidget()
+        self.content_widget.setStyleSheet("background: transparent;")
+        self.content_layout = QtWidgets.QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(12, 10, 12, 14)
+        self.content_layout.setSpacing(8)
+
+        self.scroll_content.setWidget(self.content_widget)
+        self.layout_main.addWidget(self.scroll_content)
+
+        # Monta os controles de filtro
+        self._construir_controles_filtros()
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            if self.header_frame.geometry().contains(event.pos()):
+                self._is_dragging = True
+                self._drag_start_pos = event.globalPos()
+                self._drag_pos = event.globalPos() - self.pos()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._is_dragging and (event.buttons() & QtCore.Qt.LeftButton):
+            new_pos = event.globalPos() - self._drag_pos
+            if self.parent():
+                p_w = self.parent().width()
+                p_h = self.parent().height()
+                new_x = max(5, min(new_pos.x(), p_w - self.width() - 5))
+                new_y = max(5, min(new_pos.y(), p_h - self.height() - 5))
+                self.move(new_x, new_y)
+            else:
+                self.move(new_pos)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._is_dragging:
+            self._is_dragging = False
+            # Se o mouse quase não se moveu (< 5 pixels), interpreta como clique para recolher/expandir
+            if (event.globalPos() - getattr(self, '_drag_start_pos', event.globalPos())).manhattanLength() < 5:
+                if self.header_frame.geometry().contains(event.pos()):
+                    self.toggle_collapsed()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def toggle_collapsed(self):
+        self.is_collapsed = not self.is_collapsed
+        if self.is_collapsed:
+            self.scroll_content.setVisible(False)
+            self.btn_toggle_collapse.setText("▼")
+            self.lbl_hud_hint.setText("<small style='color:#a0a0a0;'>(Clique p/ expandir)</small>")
+            self.header_frame.setStyleSheet("""
+                QFrame {
+                    background-color: rgba(30, 30, 40, 0.98);
+                    border-radius: 7px;
+                }
+                QFrame:hover {
+                    background-color: rgba(42, 42, 56, 0.98);
+                }
+            """)
+            self.setFixedSize(350, 42)
+        else:
+            self.scroll_content.setVisible(True)
+            self.btn_toggle_collapse.setText("▲")
+            self.lbl_hud_hint.setText("<small style='color:#a0a0a0;'>(Clique p/ recolher)</small>")
+            self.header_frame.setStyleSheet("""
+                QFrame {
+                    background-color: rgba(30, 30, 40, 0.98);
+                    border-top-left-radius: 7px;
+                    border-top-right-radius: 7px;
+                    border-bottom: 1px solid #3a3a3c;
+                }
+                QFrame:hover {
+                    background-color: rgba(42, 42, 56, 0.98);
+                }
+            """)
+            self.setFixedSize(350, 520)
+
+    def _construir_controles_filtros(self):
+        if not self.main_gui:
+            return
+
+        chk_style = """
+            QCheckBox {
+                color: #e1e1e6;
+                font-size: 8.5pt;
+                spacing: 6px;
+            }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1px solid #555555;
+                background: #18181f;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:hover {
+                border: 1px solid #00e5ff;
+            }
+            QCheckBox::indicator:checked {
+                border: 1px solid #00e5ff;
+                background: #00e5ff;
+                border-radius: 3px;
+            }
+        """
+
+        chk_green_style = """
+            QCheckBox {
+                color: #76ff03;
+                font-weight: bold;
+                font-size: 8.5pt;
+                spacing: 6px;
+            }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1px solid #555555;
+                background: #18181f;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:hover {
+                border: 1px solid #76ff03;
+            }
+            QCheckBox::indicator:checked {
+                border: 1px solid #76ff03;
+                background: #76ff03;
+                border-radius: 3px;
+            }
+        """
+
+        chk_cyan_style = """
+            QCheckBox {
+                color: #00e5ff;
+                font-weight: bold;
+                font-size: 8.5pt;
+                spacing: 6px;
+            }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1px solid #555555;
+                background: #18181f;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:hover {
+                border: 1px solid #00e5ff;
+            }
+            QCheckBox::indicator:checked {
+                border: 1px solid #00e5ff;
+                background: #00e5ff;
+                border-radius: 3px;
+            }
+        """
+
+        # 1. Filtros por Material & Classe de Corrosão
+        lbl_mat_cls = QtWidgets.QLabel("<b>Filtros de Amostras:</b>")
+        lbl_mat_cls.setStyleSheet("color: #29b6f6; font-size: 8.5pt; background: transparent;")
+        self.content_layout.addWidget(lbl_mat_cls)
+
+        grid_mc = QtWidgets.QGridLayout()
+        grid_mc.setSpacing(4)
+
+        row_m = 0
+        if hasattr(self.main_gui, 'coil_filter_checkboxes_material'):
+            for mat_n, orig_chk in self.main_gui.coil_filter_checkboxes_material.items():
+                chk = QtWidgets.QCheckBox(mat_n)
+                chk.setStyleSheet(chk_style)
+                chk.setChecked(orig_chk.isChecked())
+                def make_sync_mat(oc, c):
+                    c.stateChanged.connect(lambda s: oc.setChecked(bool(s)))
+                    oc.stateChanged.connect(lambda s: c.setChecked(bool(s)))
+                make_sync_mat(orig_chk, chk)
+                grid_mc.addWidget(chk, row_m, 0)
+                row_m += 1
+
+        row_c = 0
+        cls_list = [
+            ("Saudável", getattr(self.main_gui, 'chk_coil_filter_saudavel', None)),
+            ("Leve", getattr(self.main_gui, 'chk_coil_filter_leve', None)),
+            ("Moderada", getattr(self.main_gui, 'chk_coil_filter_moderada', None)),
+            ("Avançada", getattr(self.main_gui, 'chk_coil_filter_avancada', None)),
+            ("Corroído", getattr(self.main_gui, 'chk_coil_filter_corroido', None)),
+            ("Ar Livre", getattr(self.main_gui, 'chk_coil_filter_ar_cls', None)),
+            ("Não Definido", getattr(self.main_gui, 'chk_coil_filter_nao_definido', None)),
+        ]
+        for c_name, orig_chk in cls_list:
+            if orig_chk:
+                chk = QtWidgets.QCheckBox(c_name)
+                chk.setStyleSheet(chk_style)
+                chk.setChecked(orig_chk.isChecked())
+                def make_sync_cls(oc, c):
+                    c.stateChanged.connect(lambda s: oc.setChecked(bool(s)))
+                    oc.stateChanged.connect(lambda s: c.setChecked(bool(s)))
+                make_sync_cls(orig_chk, chk)
+                grid_mc.addWidget(chk, row_c, 1)
+                row_c += 1
+
+        self.content_layout.addLayout(grid_mc)
+
+        # Divisor
+        line1 = QtWidgets.QFrame()
+        line1.setFrameShape(QtWidgets.QFrame.HLine)
+        line1.setStyleSheet("color: #3a3a3c;")
+        self.content_layout.addWidget(line1)
+
+        # 2. Opções Visuais
+        lbl_opts = QtWidgets.QLabel("<b>Opções de Visualização:</b>")
+        lbl_opts.setStyleSheet("color: #29b6f6; font-size: 8.5pt; background: transparent;")
+        self.content_layout.addWidget(lbl_opts)
+
+        opts_list = [
+            ("Diferenciar Tonalidades por ID", getattr(self.main_gui, 'chk_diferenciar_ids_tonalidade', None)),
+            ("Exibir Tooltips e Destaques", getattr(self.main_gui, 'chk_coil_enable_tooltips', None)),
+            ("Exibir Tendência Estável (Tempo Real)", getattr(self.main_gui, 'chk_rt_exibir_tendencia', None)),
+            ("Remover Outliers (IQR)", getattr(self.main_gui, 'chk_coil_filter_outliers', None)),
+        ]
+        for opt_name, orig_chk in opts_list:
+            if orig_chk:
+                chk = QtWidgets.QCheckBox(opt_name)
+                chk.setStyleSheet(chk_style)
+                chk.setChecked(orig_chk.isChecked())
+                def make_sync_opt(oc, c):
+                    c.stateChanged.connect(lambda s: oc.setChecked(bool(s)))
+                    oc.stateChanged.connect(lambda s: c.setChecked(bool(s)))
+                make_sync_opt(orig_chk, chk)
+                self.content_layout.addWidget(chk)
+
+        # Divisor
+        line2 = QtWidgets.QFrame()
+        line2.setFrameShape(QtWidgets.QFrame.HLine)
+        line2.setStyleSheet("color: #3a3a3c;")
+        self.content_layout.addWidget(line2)
+
+        # 3. Estabilidade da Tendência (Fast-Lock) - Seleção Única Exclusiva
+        lbl_ma = QtWidgets.QLabel("<b>Estabilidade da Tendência:</b>")
+        lbl_ma.setStyleSheet("color: #76ff03; font-size: 8.5pt; background: transparent;")
+        self.content_layout.addWidget(lbl_ma)
+
+        layout_ma_h = QtWidgets.QHBoxLayout()
+        layout_ma_h.setSpacing(6)
+        
+        self.hud_ma_map = {}
+        ma_list = [
+            (10, getattr(self.main_gui, 'chk_ma_10', None)),
+            (50, getattr(self.main_gui, 'chk_ma_50', None)),
+            (100, getattr(self.main_gui, 'chk_ma_100', None)),
+            (1000, getattr(self.main_gui, 'chk_ma_1000', None)),
+        ]
+        for val, orig_chk in ma_list:
+            if orig_chk:
+                chk = QtWidgets.QCheckBox(str(val))
+                chk.setStyleSheet(chk_green_style)
+                chk.setChecked(orig_chk.isChecked())
+                self.hud_ma_map[val] = chk
+                def make_hud_ma_handler(v, oc):
+                    return lambda: self._ao_clicar_hud_ma(v, oc)
+                chk.clicked.connect(make_hud_ma_handler(val, orig_chk))
+                layout_ma_h.addWidget(chk)
+        self.content_layout.addLayout(layout_ma_h)
+
+        # Divisor
+        line3 = QtWidgets.QFrame()
+        line3.setFrameShape(QtWidgets.QFrame.HLine)
+        line3.setStyleSheet("color: #3a3a3c;")
+        self.content_layout.addWidget(line3)
+
+        # 4. Taxa de Atualização dos Sinais - Seleção Única Exclusiva
+        lbl_rate = QtWidgets.QLabel("<b>Taxa de Atualização dos Sinais:</b>")
+        lbl_rate.setStyleSheet("color: #00e5ff; font-size: 8.5pt; background: transparent;")
+        self.content_layout.addWidget(lbl_rate)
+
+        self.hud_rate_map = {}
+
+        layout_rate_h1 = QtWidgets.QHBoxLayout()
+        layout_rate_h1.setSpacing(4)
+        rate_list_1 = [
+            ("0.5s", getattr(self.main_gui, 'chk_rate_05s', None)),
+            ("1s", getattr(self.main_gui, 'chk_rate_1s', None)),
+            ("2s", getattr(self.main_gui, 'chk_rate_2s', None)),
+            ("5s", getattr(self.main_gui, 'chk_rate_5s', None)),
+            ("10s", getattr(self.main_gui, 'chk_rate_10s', None)),
+        ]
+        for r_key, orig_chk in rate_list_1:
+            if orig_chk:
+                chk = QtWidgets.QCheckBox(r_key)
+                chk.setStyleSheet(chk_cyan_style)
+                chk.setChecked(orig_chk.isChecked())
+                self.hud_rate_map[r_key] = chk
+                def make_hud_rate_handler(k, oc):
+                    return lambda: self._ao_clicar_hud_rate(k, oc)
+                chk.clicked.connect(make_hud_rate_handler(r_key, orig_chk))
+                layout_rate_h1.addWidget(chk)
+        self.content_layout.addLayout(layout_rate_h1)
+
+        layout_rate_h2 = QtWidgets.QHBoxLayout()
+        layout_rate_h2.setSpacing(4)
+        orig_samples_chk = getattr(self.main_gui, 'chk_rate_samples', None)
+        if orig_samples_chk:
+            chk_samp = QtWidgets.QCheckBox(orig_samples_chk.text())
+            chk_samp.setStyleSheet(chk_cyan_style)
+            chk_samp.setChecked(orig_samples_chk.isChecked())
+            self.hud_rate_map['samples'] = chk_samp
+            def make_hud_samples_handler(oc):
+                return lambda: self._ao_clicar_hud_rate('samples', oc)
+            chk_samp.clicked.connect(make_hud_samples_handler(orig_samples_chk))
+            layout_rate_h2.addWidget(chk_samp)
+            layout_rate_h2.addStretch()
+        self.content_layout.addLayout(layout_rate_h2)
+
+    def _ao_clicar_hud_ma(self, val_target, orig_chk):
+        for v, chk in self.hud_ma_map.items():
+            chk.blockSignals(True)
+            chk.setChecked(v == val_target)
+            chk.blockSignals(False)
+        if orig_chk:
+            orig_chk.click()
+        if 'samples' in self.hud_rate_map and hasattr(self.main_gui, 'chk_rate_samples'):
+            self.hud_rate_map['samples'].setText(self.main_gui.chk_rate_samples.text())
+
+    def _ao_clicar_hud_rate(self, key_target, orig_chk):
+        for k, chk in self.hud_rate_map.items():
+            chk.blockSignals(True)
+            chk.setChecked(k == key_target)
+            chk.blockSignals(False)
+        if orig_chk:
+            orig_chk.click()
+
+    def sync_from_main(self):
+        # Sincroniza Estabilidade
+        for val, chk in getattr(self, 'hud_ma_map', {}).items():
+            orig_chk = getattr(self.main_gui, f'chk_ma_{val}', None)
+            if orig_chk:
+                chk.blockSignals(True)
+                chk.setChecked(orig_chk.isChecked())
+                chk.blockSignals(False)
+
+        # Sincroniza Taxa
+        rate_attr_map = {
+            '0.5s': 'chk_rate_05s',
+            '1s': 'chk_rate_1s',
+            '2s': 'chk_rate_2s',
+            '5s': 'chk_rate_5s',
+            '10s': 'chk_rate_10s',
+            'samples': 'chk_rate_samples'
+        }
+        for r_key, chk in getattr(self, 'hud_rate_map', {}).items():
+            attr_name = rate_attr_map.get(r_key)
+            orig_chk = getattr(self.main_gui, attr_name, None) if attr_name else None
+            if orig_chk:
+                chk.blockSignals(True)
+                chk.setChecked(orig_chk.isChecked())
+                if r_key == 'samples':
+                    chk.setText(orig_chk.text())
+                chk.blockSignals(False)
+
+
 class FullScreenContainerDialog(QtWidgets.QDialog):
     def __init__(self, container_widget, original_parent, title="Gráficos em Tela Cheia", parent=None):
         super().__init__(parent)
@@ -141,7 +618,16 @@ class FullScreenContainerDialog(QtWidgets.QDialog):
         # Reparenta o container gráfico para a janela em tela cheia
         self.layout.addWidget(container_widget, 1)
 
-        self.floating_hud = None
+        # Adiciona o Menu Suspenso Flutuante (Floating Filter HUD)
+        self.floating_hud = FloatingFilterHUD(main_gui=parent, parent=self)
+        self.floating_hud.move(24, 64)
+        self.floating_hud.show()
+        self.floating_hud.raise_()
+
+        if parent:
+            if not hasattr(parent, '_fullscreen_dialogs_ativos'):
+                parent._fullscreen_dialogs_ativos = set()
+            parent._fullscreen_dialogs_ativos.add(self)
 
         self.showMaximized()
 
