@@ -22,7 +22,7 @@ from PyQt5 import QtCore, QtWidgets, QtGui
 import pyqtgraph as pg
 
 # Importações dos submódulos modularizados
-from gui.utils import normalizar_nome_classe, calcular_tau_e_auc
+from gui.utils import normalizar_nome_classe, calcular_tau_e_auc, AdaptiveRealtimeStabilizer
 from gui.widgets import ExclusaoSeletivaDialog, CollapsibleGroupBox
 from gui.serial_worker import SerialWorker
 from gui.dataset_manager import DatasetManager
@@ -38,7 +38,8 @@ CORES_CLASSES = {
     "Moderada": "#f1c40f",
     "Avançada": "#e67e22",
     "Corroído": "#e74c3c",
-    "Ar Livre": "#9b59b6"
+    "Ar Livre": "#9b59b6",
+    "Não Definido": "#95a5a6"
 }
 
 SIMBOLOS_MATERIAIS = {
@@ -58,6 +59,7 @@ def obter_cor_classe(cls_nome):
     if "avan" in raw.lower(): return "#e67e22"
     if "corr" in raw.lower(): return "#e74c3c"
     if "ar" in raw.lower(): return "#9b59b6"
+    if "nao def" in raw.lower() or "não def" in raw.lower() or raw.lower() == "nd": return "#95a5a6"
     return "#3498db"
 
 def obter_simbolo_material(mat_nome):
@@ -138,9 +140,20 @@ class FullScreenContainerDialog(QtWidgets.QDialog):
 
         # Reparenta o container gráfico para a janela em tela cheia
         self.layout.addWidget(container_widget, 1)
+
+        self.floating_hud = None
+
         self.showMaximized()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'floating_hud') and self.floating_hud is not None:
+            self.floating_hud.raise_()
+
     def closeEvent(self, event):
+        if self.parent() and hasattr(self.parent(), '_fullscreen_dialogs_ativos'):
+            self.parent()._fullscreen_dialogs_ativos.discard(self)
+
         # Restaura o container gráfico exatamente no seu índice original no layout pai
         if self.original_parent:
             parent_layout = None
@@ -460,6 +473,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         self.caracterizacao_dir = os.path.join(self.base_dir, "datasets", "caracterizacao_bobinas")
         self.loaded_coil_records = []
         self.imported_file_paths = []
+        self.rt_stabilizer = AdaptiveRealtimeStabilizer()
         
         # Tooltip Flutuante Persistente e Interativo
         self.floating_tooltip = CustomFloatingTooltipWidget(self)
@@ -495,6 +509,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         
         # Lista circular de pontos salvos (mantém apenas as últimas 1000 leituras na sessão)
         self.pontos_salvos = deque(maxlen=1000)
+
+        # Variáveis de monitoramento de tendência em tempo real (Módulo 2)
+        self._rt_trend_buffer = []
+        self._last_rt_trend_update_time = 0.0
+        self._last_saved_v_ma = None
+        self._last_saved_tau_trend = 0.0
+        self._last_saved_auc_trend = 0.0
+        self._rt_trend_n_samples = 0
 
         # Inicializa o classificador inteligente baseado no dataset
         self.centroids = {}
@@ -2275,7 +2297,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.layout_cls_grid.setSpacing(3)
             self.lista_widgets_classes = []
     
-            classes_lista = ["Ar Livre", "Saudável", "Leve", "Moderada", "Avançada", "Corroído"]
+            classes_lista = ["Ar Livre", "Saudável", "Leve", "Moderada", "Avançada", "Corroído", "Não Definido"]
             for idx_c, cls_nome in enumerate(classes_lista):
                 chk = QtWidgets.QCheckBox(cls_nome)
                 self.chk_classes[cls_nome] = chk
@@ -2289,20 +2311,23 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.group_classes.buttonClicked.connect(self.ao_alterar_classe_caracterizacao)
             coil_coupon_form.addRow(criar_linha_separadora())
     
-            # 4º Item: Checkboxes para Seleção do Local da Amostra
+            # 4º Item: Checkboxes para Seleção do Local da Amostra (Exclusivos)
             self.chk_locais = {}
             self.group_locais = QtWidgets.QButtonGroup(self)
+            self.group_locais.setExclusive(True)
+            locais_opcoes = ["São Paulo", "Ceara", "Venancio", "Caxias", "Rosario", "Senai", "Branco"]
             self.widget_locais_container = QtWidgets.QWidget()
             self.layout_locais_grid = QtWidgets.QGridLayout(self.widget_locais_container)
             self.layout_locais_grid.setContentsMargins(0, 0, 0, 0)
             self.layout_locais_grid.setSpacing(3)
             self.lista_widgets_locais = []
-            locais_opcoes = ["São Paulo", "Ceara", "Venancio", "Caxias", "Rosario", "Senai", "Branco"]
             for idx_l, nome_l in enumerate(locais_opcoes):
                 chk = QtWidgets.QCheckBox(nome_l)
                 self.chk_locais[nome_l] = chk
                 self.group_locais.addButton(chk)
                 self.lista_widgets_locais.append(chk)
+                if idx_l == 0:
+                    chk.setChecked(True)
                 self.layout_locais_grid.addWidget(chk, idx_l // 3, idx_l % 3)
     
             coil_coupon_form.addRow("Local da Amostra:", self.widget_locais_container)
@@ -2513,36 +2538,139 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.chk_coil_enable_tooltips.stateChanged.connect(self.ao_alternar_exibicao_tooltips)
             group_coil_filters_layout.addWidget(self.chk_coil_enable_tooltips, max_rows_f + 2, 0, 1, 2)
 
-            # Controle de Janela da Média Móvel para o Sinal Live
+            self.chk_rt_exibir_tendencia = QtWidgets.QCheckBox("Exibir Sinal / Marcador de Tendência Estável (Tempo Real)")
+            self.chk_rt_exibir_tendencia.setToolTip("Exibe o sinal suavizado e os marcadores de tendência estabilizados (média móvel) nos 4 gráficos de monitoramento em tempo real")
+            self.chk_rt_exibir_tendencia.setChecked(True)
+            self.chk_rt_exibir_tendencia.stateChanged.connect(self.ao_alternar_exibicao_tendencia_rt)
+            group_coil_filters_layout.addWidget(self.chk_rt_exibir_tendencia, max_rows_f + 3, 0, 1, 2)
+
+            # Controle de Nível de Estabilidade (Filtro Adaptativo Inteligente com Fast-Attack e Zero-Jitter Lock)
             box_ma = QtWidgets.QWidget()
-            layout_ma = QtWidgets.QHBoxLayout(box_ma)
+            layout_ma = QtWidgets.QVBoxLayout(box_ma)
             layout_ma.setContentsMargins(0, 4, 0, 0)
-            layout_ma.setSpacing(6)
+            layout_ma.setSpacing(4)
             
-            lbl_ma = QtWidgets.QLabel("Média Móvel (Sinal Live):")
+            lbl_ma = QtWidgets.QLabel("Estabilidade da Tendência (Fast-Lock):")
             lbl_ma.setStyleSheet("color: #a0a0a0; font-size: 8.5pt; font-weight: bold;")
             
-            self.combo_coil_ma_window = QtWidgets.QComboBox()
-            self.combo_coil_ma_window.addItems(["Desativada", "10 amostras", "50 amostras", "100 amostras"])
-            self.combo_coil_ma_window.setCurrentText("50 amostras")
-            self.combo_coil_ma_window.setToolTip("Define a janela da Média Móvel (curva verde lima neon) em tempo real")
-            self.combo_coil_ma_window.setStyleSheet("""
-                QComboBox {
-                    background-color: #2c2c2e;
+            layout_chks = QtWidgets.QHBoxLayout()
+            layout_chks.setContentsMargins(0, 0, 0, 0)
+            layout_chks.setSpacing(6)
+
+            chk_ma_style = """
+                QCheckBox {
                     color: #76ff03;
-                    border: 1px solid #3a3a3c;
-                    border-radius: 4px;
-                    padding: 3px 6px;
                     font-weight: bold;
                     font-size: 8.5pt;
                 }
-                QComboBox::drop-down { border: none; }
-            """)
-            self.combo_coil_ma_window.currentTextChanged.connect(self.atualizar_todos_graficos_caracterizacao)
+                QCheckBox::indicator {
+                    width: 13px;
+                    height: 13px;
+                }
+                QCheckBox::indicator:unchecked {
+                    border: 1px solid #555555;
+                    background: #1e1e1e;
+                    border-radius: 3px;
+                }
+                QCheckBox::indicator:checked {
+                    border: 1px solid #76ff03;
+                    background: #76ff03;
+                    border-radius: 3px;
+                }
+            """
+
+            self.chk_ma_10 = QtWidgets.QCheckBox("10")
+            self.chk_ma_50 = QtWidgets.QCheckBox("50")
+            self.chk_ma_100 = QtWidgets.QCheckBox("100")
+            self.chk_ma_1000 = QtWidgets.QCheckBox("1000")
+
+            self.chk_ma_10.setToolTip("10 - Modo Rápido / Sensível (Deadband 0.8%): Resposta ultra-rápida com filtro adaptativo.")
+            self.chk_ma_50.setToolTip("50 - Modo Equilibrado (Deadband 1.5%): Excelente equilíbrio entre resposta rápida e estabilização.")
+            self.chk_ma_100.setToolTip("100 - Alta Estabilidade (Deadband 2.2%): Filtragem reforçada com resposta imediata a degraus.")
+            self.chk_ma_1000.setToolTip("1000 - Travamento Total de Bancada (Deadband 3.5%): Elimina 100% de qualquer jitter/oscilação residual com convergência instantânea.")
+
+            self.chk_ma_50.setChecked(True)
+
+            for chk in [self.chk_ma_10, self.chk_ma_50, self.chk_ma_100, self.chk_ma_1000]:
+                chk.setStyleSheet(chk_ma_style)
+                chk.clicked.connect(self._on_ma_checkbox_clicked)
+                layout_chks.addWidget(chk)
             
             layout_ma.addWidget(lbl_ma)
-            layout_ma.addWidget(self.combo_coil_ma_window)
-            group_coil_filters_layout.addWidget(box_ma, max_rows_f + 3, 0, 1, 2)
+            layout_ma.addLayout(layout_chks)
+            group_coil_filters_layout.addWidget(box_ma, max_rows_f + 4, 0, 1, 2)
+
+            # Controle de Taxa de Atualização dos Sinais (Checkboxes: 0.5s, 1s, 2s, 5s, 10s)
+            box_rate = QtWidgets.QWidget()
+            layout_rate = QtWidgets.QVBoxLayout(box_rate)
+            layout_rate.setContentsMargins(0, 6, 0, 0)
+            layout_rate.setSpacing(4)
+            
+            lbl_rate = QtWidgets.QLabel("Taxa de Atualização dos Sinais:")
+            lbl_rate.setStyleSheet("color: #a0a0a0; font-size: 8.5pt; font-weight: bold;")
+            
+            layout_rate_chks = QtWidgets.QHBoxLayout()
+            layout_rate_chks.setContentsMargins(0, 0, 0, 0)
+            layout_rate_chks.setSpacing(4)
+
+            chk_rate_style = """
+                QCheckBox {
+                    color: #00e5ff;
+                    font-weight: bold;
+                    font-size: 8.5pt;
+                }
+                QCheckBox::indicator {
+                    width: 13px;
+                    height: 13px;
+                }
+                QCheckBox::indicator:unchecked {
+                    border: 1px solid #555555;
+                    background: #1e1e1e;
+                    border-radius: 3px;
+                }
+                QCheckBox::indicator:checked {
+                    border: 1px solid #00e5ff;
+                    background: #00e5ff;
+                    border-radius: 3px;
+                }
+            """
+
+            self.chk_rate_05s = QtWidgets.QCheckBox("0.5s")
+            self.chk_rate_1s = QtWidgets.QCheckBox("1s")
+            self.chk_rate_2s = QtWidgets.QCheckBox("2s")
+            self.chk_rate_5s = QtWidgets.QCheckBox("5s")
+            self.chk_rate_10s = QtWidgets.QCheckBox("10s")
+            self.chk_rate_samples = QtWidgets.QCheckBox("Por Lote (50 amostras)")
+
+            self.chk_rate_05s.setToolTip("Atualiza os sinais e gráficos a cada 0,5 segundos (2 Hz).")
+            self.chk_rate_1s.setToolTip("Atualiza os sinais e gráficos a cada 1,0 segundo (1 Hz).")
+            self.chk_rate_2s.setToolTip("Atualiza os sinais e gráficos a cada 2,0 segundos (0,5 Hz).")
+            self.chk_rate_5s.setToolTip("Atualiza os sinais e gráficos a cada 5,0 segundos.")
+            self.chk_rate_10s.setToolTip("Atualiza os sinais e gráficos a cada 10,0 segundos.")
+            self.chk_rate_samples.setToolTip("Atualiza a tendência somente após receber o lote completo de curvas selecionado na Estabilidade (10, 50, 100 ou 1000).")
+
+            self.chk_rate_05s.setChecked(True)
+
+            layout_rate_chks1 = QtWidgets.QHBoxLayout()
+            layout_rate_chks1.setContentsMargins(0, 0, 0, 0)
+            layout_rate_chks1.setSpacing(4)
+            for chk in [self.chk_rate_05s, self.chk_rate_1s, self.chk_rate_2s, self.chk_rate_5s, self.chk_rate_10s]:
+                chk.setStyleSheet(chk_rate_style)
+                chk.clicked.connect(self._on_rate_checkbox_clicked)
+                layout_rate_chks1.addWidget(chk)
+
+            layout_rate_chks2 = QtWidgets.QHBoxLayout()
+            layout_rate_chks2.setContentsMargins(0, 2, 0, 0)
+            layout_rate_chks2.setSpacing(4)
+            self.chk_rate_samples.setStyleSheet(chk_rate_style)
+            self.chk_rate_samples.clicked.connect(self._on_rate_checkbox_clicked)
+            layout_rate_chks2.addWidget(self.chk_rate_samples)
+            layout_rate_chks2.addStretch()
+
+            layout_rate.addWidget(lbl_rate)
+            layout_rate.addLayout(layout_rate_chks1)
+            layout_rate.addLayout(layout_rate_chks2)
+            group_coil_filters_layout.addWidget(box_rate, max_rows_f + 5, 0, 1, 2)
 
             scroll_coil_layout.addWidget(group_coil_filters)
 
@@ -2581,6 +2709,7 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             group_coil_legend_layout.addWidget(QtWidgets.QLabel("🟠 Avançada"), 6, 1)
             group_coil_legend_layout.addWidget(QtWidgets.QLabel("🔴 Corroído"), 7, 0)
             group_coil_legend_layout.addWidget(QtWidgets.QLabel("🟣 Ar Livre"), 7, 1)
+            group_coil_legend_layout.addWidget(QtWidgets.QLabel("⚪ Não Definido"), 8, 0)
 
             scroll_coil_layout.addWidget(group_coil_legend)
 
@@ -3544,6 +3673,13 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
         # Atualiza self.tempo_us e self.tensao_mv para visualização em tempo real
         self.tempo_us = np.arange(len(valores_processados)) * self.dt_us
         self.tensao_mv = valores_processados
+
+        # Alimenta o buffer de acumulação para o cálculo da tendência periódica do Módulo 2
+        if not hasattr(self, '_rt_trend_buffer') or self._rt_trend_buffer is None:
+            self._rt_trend_buffer = []
+        self._rt_trend_buffer.append(np.array(valores_processados, dtype=float))
+        if len(self._rt_trend_buffer) > 2000:
+            self._rt_trend_buffer = self._rt_trend_buffer[-2000:]
 
         # Coleta de multi-amostras em tempo real para a 5ª Aba (Caracterização de Bobinas)
         if getattr(self, 'is_recording_coil_multisample', False):
@@ -4620,6 +4756,10 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             if hasattr(self, 'floating_tooltip'):
                 self.floating_tooltip.fechar_tooltip()
             self.atualizar_destaque_visual_hover(target_plot=None)
+
+    def ao_alternar_exibicao_tendencia_rt(self, state=None):
+        if hasattr(self, 'tab_sub_caracterizacao') and self.tab_sub_caracterizacao.currentIndex() == 1:
+            self.atualizar_graficos_tempo_real_caracterizacao(force_refresh=True)
 
     def ao_clicar_mouse_grafico(self, event):
         """
@@ -5768,10 +5908,12 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
             self._syncing_mat_cls = False
 
     def obter_locais_amostra_selecionados(self):
+        if hasattr(self, 'group_locais') and self.group_locais.checkedButton():
+            return self.group_locais.checkedButton().text()
         locais_sel = [nome for nome, chk in getattr(self, 'chk_locais', {}).items() if chk.isChecked()]
         if not locais_sel:
             return "Não Especificado"
-        return ", ".join(locais_sel)
+        return locais_sel[0]
 
     def obter_especificacoes_bobina_atuais(self):
         if hasattr(self, 'active_coil_info') and self.active_coil_info:
@@ -5974,7 +6116,89 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
         self.plot_coil_auc_liftoff.clear()
         self.plot_coil_l_liftoff.clear()
         self.txt_coil_report.clear()
-        self.txt_coil_report.setText("Aguardando carregamento de ensaios para gerar relatório comparativo...")
+    def obter_janela_media_movel_selecionada(self):
+        if hasattr(self, 'chk_ma_10') and self.chk_ma_10.isChecked():
+            return 10
+        if hasattr(self, 'chk_ma_50') and self.chk_ma_50.isChecked():
+            return 50
+        if hasattr(self, 'chk_ma_100') and self.chk_ma_100.isChecked():
+            return 100
+        if hasattr(self, 'chk_ma_1000') and self.chk_ma_1000.isChecked():
+            return 1000
+        return 0
+
+    def _on_ma_checkbox_clicked(self):
+        sender = self.sender()
+        if sender and sender.isChecked():
+            for chk in [getattr(self, 'chk_ma_10', None), getattr(self, 'chk_ma_50', None), getattr(self, 'chk_ma_100', None), getattr(self, 'chk_ma_1000', None)]:
+                if chk and chk is not sender:
+                    chk.blockSignals(True)
+                    chk.setChecked(False)
+                    chk.blockSignals(False)
+        self._atualizar_texto_chk_rate_samples()
+        if hasattr(self, '_fullscreen_dialogs_ativos'):
+            for d in list(self._fullscreen_dialogs_ativos):
+                if hasattr(d, 'floating_hud') and d.floating_hud is not None:
+                    d.floating_hud.sync_from_main()
+        self._rt_live_history = []
+        self._rt_trend_buffer = []
+        self._last_rt_trend_update_time = 0.0
+        self.atualizar_todos_graficos_caracterizacao()
+
+    def _atualizar_texto_chk_rate_samples(self):
+        if hasattr(self, 'chk_rate_samples'):
+            n = self.obter_janela_media_movel_selecionada()
+            if n <= 0: n = 50
+            self.chk_rate_samples.setText(f"Por Lote ({n} amostras)")
+            self.chk_rate_samples.setToolTip(f"Atualiza a tendência somente após receber o lote completo de {n} curvas da serial.")
+
+    def _on_rate_checkbox_clicked(self):
+        sender = self.sender()
+        if not sender:
+            return
+        
+        all_chks = [
+            getattr(self, 'chk_rate_05s', None),
+            getattr(self, 'chk_rate_1s', None),
+            getattr(self, 'chk_rate_2s', None),
+            getattr(self, 'chk_rate_5s', None),
+            getattr(self, 'chk_rate_10s', None),
+            getattr(self, 'chk_rate_samples', None)
+        ]
+        
+        if sender.isChecked():
+            for chk in all_chks:
+                if chk and chk != sender:
+                    chk.blockSignals(True)
+                    chk.setChecked(False)
+                    chk.blockSignals(False)
+        else:
+            sender.blockSignals(True)
+            sender.setChecked(True)
+            sender.blockSignals(False)
+
+        if hasattr(self, '_fullscreen_dialogs_ativos'):
+            for d in list(self._fullscreen_dialogs_ativos):
+                if hasattr(d, 'floating_hud') and d.floating_hud is not None:
+                    d.floating_hud.sync_from_main()
+
+        self._last_rt_trend_update_time = 0.0
+        if hasattr(self, 'tab_sub_caracterizacao') and self.tab_sub_caracterizacao.currentIndex() == 1:
+            self.atualizar_graficos_tempo_real_caracterizacao(force_refresh=True)
+
+    def obter_taxa_atualizacao_sinais_selecionada(self):
+        """Retorna o período de atualização dos sinais em segundos (0.5, 1.0, 2.0, 5.0, 10.0) ou 'samples'."""
+        if hasattr(self, 'chk_rate_samples') and self.chk_rate_samples.isChecked():
+            return 'samples'
+        if hasattr(self, 'chk_rate_10s') and self.chk_rate_10s.isChecked():
+            return 10.0
+        if hasattr(self, 'chk_rate_5s') and self.chk_rate_5s.isChecked():
+            return 5.0
+        if hasattr(self, 'chk_rate_2s') and self.chk_rate_2s.isChecked():
+            return 2.0
+        if hasattr(self, 'chk_rate_1s') and self.chk_rate_1s.isChecked():
+            return 1.0
+        return 0.5
 
     def atualizar_todos_graficos_caracterizacao(self, *args):
         self._rt_bg_rebuild_needed = True
@@ -6221,10 +6445,16 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
         if not hasattr(self, 'plot_coil_rt_decay'):
             return
 
-        # Limite de taxa de atualização (FPS Limiter ~28 FPS / 35ms) para evitar sobrecarga da interface durante streaming serial contínuo
+        # Limite geral da interface para os overlays Live em tempo real (~28 FPS / 35ms)
         now = time.time()
         last_update = getattr(self, '_last_rt_plot_time', 0.0)
-        if not force_refresh and (now - last_update) < 0.035:
+        rate_mode = self.obter_taxa_atualizacao_sinais_selecionada()
+        buf = getattr(self, '_rt_trend_buffer', [])
+        n_target = self.obter_janela_media_movel_selecionada()
+        if n_target <= 0:
+            n_target = 50
+        batch_ready = (rate_mode == 'samples' and len(buf) >= n_target)
+        if not force_refresh and not batch_ready and (now - last_update) < 0.035:
             return
         self._last_rt_plot_time = now
 
@@ -6251,6 +6481,18 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
             self._rt_auc_line = None
             self._rt_tau_pt = None
             self._rt_auc_pt = None
+            self._rt_ma_curve = None
+            self._rt_tau_trend_line = None
+            self._rt_tau_trend_pt = None
+            self._rt_auc_trend_line = None
+            self._rt_auc_trend_pt = None
+            self._rt_star_trend_item = None
+            self._last_saved_v_ma = None
+            self._last_saved_tau_trend = 0.0
+            self._last_saved_auc_trend = 0.0
+            self._last_rt_trend_update_time = 0.0
+            if hasattr(self, 'rt_stabilizer') and self.rt_stabilizer is not None:
+                self.rt_stabilizer.reset()
 
             records_estat = []
             for r in recs:
@@ -6405,7 +6647,9 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                 v = np.array(curva_raw)
 
         if t is not None and v is not None and len(t) > 0:
-            # Curva Medida Live (Verde Neon com 30% transparência e espessura fina 1.6)
+            exibir_tendencia = hasattr(self, 'chk_rt_exibir_tendencia') and self.chk_rt_exibir_tendencia.isChecked()
+
+            # 1. Curva Medida Live (Verde Neon com 30% transparência e espessura fina 1.6)
             if not hasattr(self, '_rt_live_curve') or self._rt_live_curve is None or self._rt_live_curve not in self.plot_coil_rt_decay.items:
                 pen_live = pg.mkPen(color=(0, 255, 0, 180), width=1.6)
                 title_live = "Sinal Medido em Tempo Real (Osciloscópio Live)" if is_live_stream else "Sinal de Ensaio Carregado (Simulação Live)"
@@ -6414,31 +6658,120 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
             else:
                 self._rt_live_curve.setData(t, v)
 
-            # Curva de Média Móvel em Tempo Real (Verde Lima Neon)
-            ma_str = self.combo_coil_ma_window.currentText() if hasattr(self, 'combo_coil_ma_window') else "50 amostras"
-            if ma_str != "Desativada" and len(v) > 0:
-                try:
-                    n_win = int(ma_str.split()[0])
-                except Exception:
-                    n_win = 50
+            # Processamento de Tendência Adaptativa Ultra-Estável (Fast-Attack & Zero-Jitter Lock)
+            n_win = self.obter_janela_media_movel_selecionada()
+            if n_win == 10:
+                deadband = 0.008
+                modo_nome = "Rápido (Sensível)"
+            elif n_win == 50:
+                deadband = 0.015
+                modo_nome = "Equilibrado"
+            elif n_win == 100:
+                deadband = 0.022
+                modo_nome = "Alta Estabilidade"
+            elif n_win == 1000:
+                deadband = 0.035
+                modo_nome = "Travamento Máximo (Bancada)"
+            else:
+                deadband = 0.015
+                modo_nome = "Equilibrado"
 
-                if len(v) >= n_win and n_win > 1:
-                    v_ma = np.convolve(v, np.ones(n_win) / n_win, mode='same')
-                    if not hasattr(self, '_rt_ma_curve') or self._rt_ma_curve is None or self._rt_ma_curve not in self.plot_coil_rt_decay.items:
-                        pen_ma = pg.mkPen(color='#76ff03', width=2.5)
-                        title_ma = f"Média Móvel (N = {n_win} Amostras)"
-                        self._rt_ma_curve = self.plot_coil_rt_decay.plot(t, v_ma, pen=pen_ma, name=title_ma)
-                        self._rt_ma_curve.curve_title = f"Curva de Média Móvel (N = {n_win})"
-                        self._rt_ma_curve.rec_data = {"filename": f"Média Móvel Live (N={n_win})", "material": self.obter_material_selecionado(), "classe": self.obter_classe_selecionada()}
+            rate_mode = self.obter_taxa_atualizacao_sinais_selecionada()
+            buf = getattr(self, '_rt_trend_buffer', [])
+            n_target = self.obter_janela_media_movel_selecionada()
+            if n_target <= 0:
+                n_target = 50
+
+            if rate_mode == 'samples':
+                rate_txt = f"Lote ({n_target} amostras)"
+                need_trend_calc = force_refresh or len(buf) >= n_target or not hasattr(self, '_last_saved_v_ma') or self._last_saved_v_ma is None
+            else:
+                rate_s = float(rate_mode) if isinstance(rate_mode, (int, float)) else 0.5
+                rate_txt = f"{rate_s:g}s"
+                last_trend_time = getattr(self, '_last_rt_trend_update_time', 0.0)
+                need_trend_calc = force_refresh or (now - last_trend_time) >= rate_s or not hasattr(self, '_last_saved_v_ma') or self._last_saved_v_ma is None
+
+            v_ma = None
+            tau_trend = 0.0
+            auc_trend = 0.0
+
+            if exibir_tendencia:
+                if need_trend_calc:
+                    if rate_mode == 'samples':
+                        if len(buf) >= n_target:
+                            batch = buf[:n_target]
+                            self._rt_trend_buffer = buf[n_target:]
+                        elif force_refresh and len(buf) > 0:
+                            batch = buf
+                        else:
+                            batch = None
+
+                        if batch is not None and len(batch) > 0:
+                            if hasattr(self, 'chk_ma_50') and self.chk_ma_50.isChecked() and len(batch) >= 3:
+                                v_calc = np.median(batch, axis=0)
+                            elif hasattr(self, 'chk_ma_100') and self.chk_ma_100.isChecked() and len(batch) >= 4:
+                                arr = np.sort(batch, axis=0)
+                                trim = max(1, int(len(batch) * 0.15))
+                                v_calc = np.mean(arr[trim:-trim], axis=0)
+                            else:
+                                v_calc = np.mean(batch, axis=0)
+                            self._rt_trend_n_samples = len(batch)
+                        elif v is not None and len(v) > 0:
+                            v_calc = np.array(v, dtype=float)
+                            self._rt_trend_n_samples = 1
+                        else:
+                            v_calc = getattr(self, '_last_saved_v_ma', None)
                     else:
-                        self._rt_ma_curve.setData(t, v_ma)
-                        self._rt_ma_curve.curve_title = f"Curva de Média Móvel (N = {n_win})"
-                        self._rt_ma_curve.rec_data = {"filename": f"Média Móvel Live (N={n_win})", "material": self.obter_material_selecionado(), "classe": self.obter_classe_selecionada()}
+                        # Modo por tempo (0.5s, 1s, 2s, 5s, 10s)
+                        if buf and len(buf) > 0:
+                            if hasattr(self, 'chk_ma_50') and self.chk_ma_50.isChecked() and len(buf) >= 3:
+                                v_calc = np.median(buf, axis=0)
+                            elif hasattr(self, 'chk_ma_100') and self.chk_ma_100.isChecked() and len(buf) >= 4:
+                                arr = np.sort(buf, axis=0)
+                                trim = max(1, int(len(buf) * 0.15))
+                                v_calc = np.mean(arr[trim:-trim], axis=0)
+                            else:
+                                v_calc = np.mean(buf, axis=0)
+
+                            self._rt_trend_n_samples = len(buf)
+                            self._rt_trend_buffer = []
+                        elif v is not None and len(v) > 0:
+                            v_calc = np.array(v, dtype=float)
+                            self._rt_trend_n_samples = 1
+                        else:
+                            v_calc = getattr(self, '_last_saved_v_ma', None)
+
+                    if v_calc is not None and len(v_calc) > 0:
+                        dt_u = getattr(self, 'dt_us', 0.1)
+                        tau_calc, auc_calc = calcular_tau_e_auc(v_calc, dt_u)
+                        self._last_saved_v_ma = v_calc
+                        self._last_saved_tau_trend = tau_calc
+                        self._last_saved_auc_trend = auc_calc
+                        self._last_rt_trend_update_time = now
+                        v_ma = v_calc
+                        tau_trend = tau_calc
+                        auc_trend = auc_calc
+                    else:
+                        v_ma = getattr(self, '_last_saved_v_ma', None)
+                        tau_trend = getattr(self, '_last_saved_tau_trend', 0.0)
+                        auc_trend = getattr(self, '_last_saved_auc_trend', 0.0)
                 else:
-                    if hasattr(self, '_rt_ma_curve') and self._rt_ma_curve is not None:
-                        if self._rt_ma_curve in self.plot_coil_rt_decay.items:
-                            self.plot_coil_rt_decay.removeItem(self._rt_ma_curve)
-                        self._rt_ma_curve = None
+                    v_ma = getattr(self, '_last_saved_v_ma', None)
+                    tau_trend = getattr(self, '_last_saved_tau_trend', 0.0)
+                    auc_trend = getattr(self, '_last_saved_auc_trend', 0.0)
+
+            # Gráfico 1: Atualização da curva de tendência (Filtro Adaptativo Estabilizado)
+            if exibir_tendencia and v_ma is not None and len(v_ma) > 0:
+                if not hasattr(self, '_rt_ma_curve') or self._rt_ma_curve is None or self._rt_ma_curve not in self.plot_coil_rt_decay.items:
+                    pen_ma = pg.mkPen(color='#76ff03', width=2.5)
+                    title_ma = f"Sinal de Tendência (Modo {modo_nome})"
+                    self._rt_ma_curve = self.plot_coil_rt_decay.plot(t, v_ma, pen=pen_ma, name=title_ma)
+                    self._rt_ma_curve.curve_title = f"Curva de Tendência Estável ({modo_nome})"
+                    self._rt_ma_curve.rec_data = {"filename": f"Tendência Live ({modo_nome})", "material": self.obter_material_selecionado(), "classe": self.obter_classe_selecionada()}
+                else:
+                    self._rt_ma_curve.setData(t, v_ma)
+                    self._rt_ma_curve.curve_title = f"Curva de Tendência Estável ({modo_nome})"
+                    self._rt_ma_curve.rec_data = {"filename": f"Tendência Live ({modo_nome})", "material": self.obter_material_selecionado(), "classe": self.obter_classe_selecionada()}
             else:
                 if hasattr(self, '_rt_ma_curve') and self._rt_ma_curve is not None:
                     if self._rt_ma_curve in self.plot_coil_rt_decay.items:
@@ -6481,7 +6814,7 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                 dt_u = getattr(self, 'dt_us', 0.1)
                 live_tau, live_auc = calcular_tau_e_auc(v, dt_u)
 
-            # Overlays Live nas distribuições Tau, AUC e Scatter
+            # Gráfico 2: Overlays Live (Amarelo Instantâneo) e Tendência Estável (Verde Lima)
             if live_tau > 0:
                 if not hasattr(self, '_rt_tau_line') or self._rt_tau_line is None or self._rt_tau_line not in self.plot_coil_rt_tau.items:
                     self._rt_tau_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('#ffff00', width=1.5, style=QtCore.Qt.DashLine))
@@ -6492,6 +6825,26 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                     self._rt_tau_line.setValue(live_tau)
                     self._rt_tau_pt.setData(x=[d_liftoff_plot], y=[live_tau])
 
+            if exibir_tendencia and tau_trend > 0:
+                if not hasattr(self, '_rt_tau_trend_line') or self._rt_tau_trend_line is None or self._rt_tau_trend_line not in self.plot_coil_rt_tau.items:
+                    self._rt_tau_trend_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('#76ff03', width=2.0, style=QtCore.Qt.DashDotLine))
+                    self.plot_coil_rt_tau.addItem(self._rt_tau_trend_line)
+                    self._rt_tau_trend_pt = pg.ScatterPlotItem(x=[d_liftoff_plot], y=[tau_trend], symbol='d', size=16, brush=pg.mkBrush('#76ff03'), pen=pg.mkPen('#ffffff', width=2.0))
+                    self.plot_coil_rt_tau.addItem(self._rt_tau_trend_pt)
+                else:
+                    self._rt_tau_trend_line.setValue(tau_trend)
+                    self._rt_tau_trend_pt.setData(x=[d_liftoff_plot], y=[tau_trend])
+            else:
+                if hasattr(self, '_rt_tau_trend_line') and self._rt_tau_trend_line is not None:
+                    if self._rt_tau_trend_line in self.plot_coil_rt_tau.items:
+                        self.plot_coil_rt_tau.removeItem(self._rt_tau_trend_line)
+                    self._rt_tau_trend_line = None
+                if hasattr(self, '_rt_tau_trend_pt') and self._rt_tau_trend_pt is not None:
+                    if self._rt_tau_trend_pt in self.plot_coil_rt_tau.items:
+                        self.plot_coil_rt_tau.removeItem(self._rt_tau_trend_pt)
+                    self._rt_tau_trend_pt = None
+
+            # Gráfico 3: Overlays Live (Amarelo Instantâneo) e Tendência Estável (Verde Lima)
             if live_auc > 0:
                 if not hasattr(self, '_rt_auc_line') or self._rt_auc_line is None or self._rt_auc_line not in self.plot_coil_rt_auc.items:
                     self._rt_auc_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('#ffff00', width=1.5, style=QtCore.Qt.DashLine))
@@ -6502,8 +6855,27 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                     self._rt_auc_line.setValue(live_auc)
                     self._rt_auc_pt.setData(x=[d_liftoff_plot], y=[live_auc])
 
+            if exibir_tendencia and auc_trend > 0:
+                if not hasattr(self, '_rt_auc_trend_line') or self._rt_auc_trend_line is None or self._rt_auc_trend_line not in self.plot_coil_rt_auc.items:
+                    self._rt_auc_trend_line = pg.InfiniteLine(angle=0, pen=pg.mkPen('#76ff03', width=2.0, style=QtCore.Qt.DashDotLine))
+                    self.plot_coil_rt_auc.addItem(self._rt_auc_trend_line)
+                    self._rt_auc_trend_pt = pg.ScatterPlotItem(x=[d_liftoff_plot], y=[auc_trend], symbol='d', size=16, brush=pg.mkBrush('#76ff03'), pen=pg.mkPen('#ffffff', width=2.0))
+                    self.plot_coil_rt_auc.addItem(self._rt_auc_trend_pt)
+                else:
+                    self._rt_auc_trend_line.setValue(auc_trend)
+                    self._rt_auc_trend_pt.setData(x=[d_liftoff_plot], y=[auc_trend])
+            else:
+                if hasattr(self, '_rt_auc_trend_line') and self._rt_auc_trend_line is not None:
+                    if self._rt_auc_trend_line in self.plot_coil_rt_auc.items:
+                        self.plot_coil_rt_auc.removeItem(self._rt_auc_trend_line)
+                    self._rt_auc_trend_line = None
+                if hasattr(self, '_rt_auc_trend_pt') and self._rt_auc_trend_pt is not None:
+                    if self._rt_auc_trend_pt in self.plot_coil_rt_auc.items:
+                        self.plot_coil_rt_auc.removeItem(self._rt_auc_trend_pt)
+                    self._rt_auc_trend_pt = None
+
+            # Gráfico 4: ESTRELA AMARELA LIVE + ESTRELA DE TENDÊNCIA ESTÁVEL NO ESPAÇO DE CARACTERÍSTICAS
             if live_tau > 0 and live_auc > 0:
-                # ESTRELA AMARELA NEON MOVEL EM TEMPO REAL NO ESPAÇO DE CARACTERÍSTICAS
                 if not hasattr(self, '_rt_star_item') or self._rt_star_item is None or self._rt_star_item not in self.plot_coil_rt_scatter.items:
                     self._rt_star_item = pg.ScatterPlotItem(
                         x=[live_tau], y=[live_auc],
@@ -6515,6 +6887,23 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                 else:
                     self._rt_star_item.setData(x=[live_tau], y=[live_auc])
 
+            if exibir_tendencia and tau_trend > 0 and auc_trend > 0:
+                if not hasattr(self, '_rt_star_trend_item') or self._rt_star_trend_item is None or self._rt_star_trend_item not in self.plot_coil_rt_scatter.items:
+                    self._rt_star_trend_item = pg.ScatterPlotItem(
+                        x=[tau_trend], y=[auc_trend],
+                        symbol='star', size=18,
+                        brush=pg.mkBrush('#76ff03'),
+                        pen=pg.mkPen('#ffffff', width=2.2)
+                    )
+                    self.plot_coil_rt_scatter.addItem(self._rt_star_trend_item)
+                else:
+                    self._rt_star_trend_item.setData(x=[tau_trend], y=[auc_trend])
+            else:
+                if hasattr(self, '_rt_star_trend_item') and self._rt_star_trend_item is not None:
+                    if self._rt_star_trend_item in self.plot_coil_rt_scatter.items:
+                        self.plot_coil_rt_scatter.removeItem(self._rt_star_trend_item)
+                    self._rt_star_trend_item = None
+
             # Atualiza o painel de relatório em HTML em taxa reduzida (4 FPS / 250ms) para evitar reflows de texto no Qt
             last_html_time = getattr(self, '_last_rt_html_time', 0.0)
             if force_refresh or (now - last_html_time) > 0.25:
@@ -6522,12 +6911,25 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                 active_info = self.obter_especificacoes_bobina_atuais()
                 active_id = active_info.get("id", "681")
                 n_pts = len(v) if v is not None else 0
+                n_acc = getattr(self, '_rt_trend_n_samples', 1)
+                buf_len = len(getattr(self, '_rt_trend_buffer', []))
+
+                if rate_mode == 'samples':
+                    status_lote = f" | Progresso: {buf_len}/{n_target} coletados" if buf_len > 0 else ""
+                    trend_label = f"Tendência por Lote ({n_target} amostras{status_lote})"
+                else:
+                    trend_label = f"Tendência Consolidada ({rate_txt} | N={n_acc} pacotes)"
+
+                if exibir_tendencia and tau_trend > 0:
+                    trend_html = f"<br><b>{trend_label}:</b> Tau = {self.formatar_valor_tempo(tau_trend)} | AUC = {auc_trend:.1f}"
+                else:
+                    trend_html = ""
                 self.txt_coil_rt_report.setHtml(
                     f"<h3>=== Monitoramento em Tempo Real do Sensor ===</h3>"
-                    f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')}) | <b>Lift-Off Atual:</b> {d_liftoff:.2f} mm | <b>Sinal:</b> {n_pts} pontos<br>"
-                    f"<b>Fonte do Sinal:</b> {fonte_txt}<br>"
-                    f"<b>Medições Live:</b> Tau = {self.formatar_valor_tempo(live_tau)} | AUC = {live_auc:.1f}<br>"
-                    f"<small style='color:#a0a0a0;'>Gráficos e marcadores ativos ★ atualizados continuamente via interface USB/COM.</small>"
+                    f"<b>Sensor Ativo:</b> Bobina {active_id} ({active_info.get('model', 'Padrão')}) | <b>Lift-Off Atual:</b> {d_liftoff:.2f} mm | <b>Taxa da Tendência:</b> {rate_txt}<br>"
+                    f"<b>Fonte do Sinal:</b> {fonte_txt} ({n_pts} pontos)<br>"
+                    f"<b>Medições Live (Tempo Real Contínuo):</b> Tau = {self.formatar_valor_tempo(live_tau)} | AUC = {live_auc:.1f}{trend_html}<br>"
+                    f"<small style='color:#a0a0a0;'>Estrelas Amarelas (★ Live) em tempo real contínuo (~30 FPS). Marcadores Verdes (★ Tendência) atualizados na cadência ({rate_txt}).</small>"
                 )
         else:
             self.txt_coil_rt_report.setHtml(
