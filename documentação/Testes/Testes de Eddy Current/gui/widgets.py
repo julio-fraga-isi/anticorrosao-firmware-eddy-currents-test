@@ -52,7 +52,7 @@ class ExclusaoSeletivaDialog(QtWidgets.QDialog):
         # Dropdown de Classe
         layout.addWidget(QtWidgets.QLabel("Classe/Degradação:"))
         self.combo_classe = QtWidgets.QComboBox()
-        self.combo_classe.addItems(["[Todas as Classes]", "Saudável", "Leve", "Moderada", "Avançada", "Corroído", "Ar Livre"])
+        self.combo_classe.addItems(["[Todas as Classes]", "Saudável", "Leve", "Moderada", "Avançada", "Corroído", "Ar Livre", "Não Definido"])
         layout.addWidget(self.combo_classe)
         
         layout.addSpacing(15)

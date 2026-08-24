@@ -27,6 +27,8 @@ def normalizar_nome_classe(classe_str):
         return "Corroído"
     elif "ar livre" in classe_normalizada or "arlivre" in classe_normalizada:
         return "Ar Livre"
+    elif "nao definido" in classe_normalizada or "naodefinido" in classe_normalizada or classe_normalizada == "nd":
+        return "Não Definido"
     
     return "Sem Dados"
 

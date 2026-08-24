@@ -2291,15 +2291,17 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
     
             # 4º Item: Checkboxes para Seleção do Local da Amostra
             self.chk_locais = {}
-            locais_opcoes = ["São Paulo", "Ceara", "Venancio", "Caxias", "Rosario", "Senai", "Branco"]
+            self.group_locais = QtWidgets.QButtonGroup(self)
             self.widget_locais_container = QtWidgets.QWidget()
             self.layout_locais_grid = QtWidgets.QGridLayout(self.widget_locais_container)
             self.layout_locais_grid.setContentsMargins(0, 0, 0, 0)
             self.layout_locais_grid.setSpacing(3)
             self.lista_widgets_locais = []
+            locais_opcoes = ["São Paulo", "Ceara", "Venancio", "Caxias", "Rosario", "Senai", "Branco"]
             for idx_l, nome_l in enumerate(locais_opcoes):
                 chk = QtWidgets.QCheckBox(nome_l)
                 self.chk_locais[nome_l] = chk
+                self.group_locais.addButton(chk)
                 self.lista_widgets_locais.append(chk)
                 self.layout_locais_grid.addWidget(chk, idx_l // 3, idx_l % 3)
     
@@ -2479,11 +2481,14 @@ class EddyCurrentPlotter(QtWidgets.QWidget):
             self.chk_coil_filter_corroido.setChecked(True)
             self.chk_coil_filter_ar_cls = QtWidgets.QCheckBox("Ar Livre")
             self.chk_coil_filter_ar_cls.setChecked(True)
+            self.chk_coil_filter_nao_definido = QtWidgets.QCheckBox("Não Definido")
+            self.chk_coil_filter_nao_definido.setChecked(True)
 
             cls_chks = [
                 self.chk_coil_filter_saudavel, self.chk_coil_filter_leve,
                 self.chk_coil_filter_moderada, self.chk_coil_filter_avancada,
-                self.chk_coil_filter_corroido, self.chk_coil_filter_ar_cls
+                self.chk_coil_filter_corroido, self.chk_coil_filter_ar_cls,
+                self.chk_coil_filter_nao_definido
             ]
             for idx_fc, chk_c in enumerate(cls_chks):
                 chk_c.setStyleSheet("font-size: 8.5pt; color: #e1e1e6;")
@@ -6010,7 +6015,8 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                 "Moderada": getattr(self, 'chk_coil_filter_moderada', None),
                 "Avançada": getattr(self, 'chk_coil_filter_avancada', None),
                 "Corroído": getattr(self, 'chk_coil_filter_corroido', None),
-                "Ar Livre": getattr(self, 'chk_coil_filter_ar_cls', None)
+                "Ar Livre": getattr(self, 'chk_coil_filter_ar_cls', None),
+                "Não Definido": getattr(self, 'chk_coil_filter_nao_definido', None)
             }
             cls_ok = [c for c, chk in cls_map.items() if chk is None or chk.isChecked()]
             recs_para_plotar = [r for r in recs_para_plotar if r.get("material", "A36 Comum") in mats_ok and r.get("classe", "Saudável") in cls_ok]
@@ -6281,7 +6287,8 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                     "Moderada": getattr(self, 'chk_coil_filter_moderada', None),
                     "Avançada": getattr(self, 'chk_coil_filter_avancada', None),
                     "Corroído": getattr(self, 'chk_coil_filter_corroido', None),
-                    "Ar Livre": getattr(self, 'chk_coil_filter_ar_cls', None)
+                    "Ar Livre": getattr(self, 'chk_coil_filter_ar_cls', None),
+                    "Não Definido": getattr(self, 'chk_coil_filter_nao_definido', None)
                 }
                 cls_ok = [c for c, chk in cls_map.items() if chk is None or chk.isChecked()]
                 records_estat = [a for a in records_estat if a["material"] in mats_ok and a["classe"] in cls_ok]
@@ -6724,7 +6731,8 @@ CARACTERÍSTICAS DO SENSOR SELECIONADO: BOBINA {info['id']}
                 "Moderada": getattr(self, 'chk_coil_filter_moderada', None),
                 "Avançada": getattr(self, 'chk_coil_filter_avancada', None),
                 "Corroído": getattr(self, 'chk_coil_filter_corroido', None),
-                "Ar Livre": getattr(self, 'chk_coil_filter_ar_cls', None)
+                "Ar Livre": getattr(self, 'chk_coil_filter_ar_cls', None),
+                "Não Definido": getattr(self, 'chk_coil_filter_nao_definido', None)
             }
             cls_ok = [c for c, chk in cls_map.items() if chk is None or chk.isChecked()]
 

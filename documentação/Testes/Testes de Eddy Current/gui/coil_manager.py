@@ -26,7 +26,8 @@ MAPA_CODIGOS_CLASSE = {
     "MO": "Moderada",
     "AV": "Avançada",
     "CO": "Corroído",
-    "AL": "Ar Livre"
+    "AL": "Ar Livre",
+    "ND": "Não Definido"
 }
 MAPA_NOMES_CLASSE = {
     "SAUDÁVEL": "SA", "SAUDAVEL": "SA", "SA": "SA",
@@ -34,7 +35,8 @@ MAPA_NOMES_CLASSE = {
     "MODERADA": "MO", "MODERADO": "MO", "MO": "MO",
     "AVANÇADA": "AV", "AVANCADA": "AV", "AVANÇADO": "AV", "AVANCADO": "AV", "AV": "AV",
     "CORROÍDO": "CO", "CORROIDO": "CO", "CO": "CO",
-    "AR LIVRE": "AL", "AL": "AL"
+    "AR LIVRE": "AL", "AL": "AL",
+    "NÃO DEFINIDO": "ND", "NAO DEFINIDO": "ND", "ND": "ND"
 }
 
 MAPA_CODIGOS_LOCAL = {
